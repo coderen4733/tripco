@@ -1,0 +1,21 @@
+from datetime import datetime, timezone
+
+from pydantic import BaseModel, Field
+
+
+class PositionEntity(BaseModel):
+    # 1. 직급/직위(Positon) 기본 정보
+    position_id: str  # ERP 직급/직위id
+    name: str  # 직급/직위명
+
+    # 2. 직급/직위(Positon) 정렬 관련
+    status: bool = Field(default=True)  # 현재 사용 여부
+    order: str  # 배열 순서
+
+    # 3. 직급/직위(Positon) 메타데이터
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc)
+    )  # 생성일
+    updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc)
+    )  # 수정일
