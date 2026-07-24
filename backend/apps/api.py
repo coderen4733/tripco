@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 
+from apps.employee.router import employee_router
 from apps.organization.department.router import dept_router
 from apps.organization.duty.router import duty_router
 from apps.organization.employment_type.router import emp_type_router
@@ -43,4 +44,9 @@ api_router.include_router(
     emp_type_router,
     prefix="/organizations/employment_types",
     tags=["Mst EmploymentType 고용형태"],
+)
+
+# 2. 임직원(Employee)
+api_router.include_router(
+    employee_router, prefix="/employees", tags=["Employee 임직원"]
 )

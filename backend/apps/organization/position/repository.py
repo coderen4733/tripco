@@ -64,6 +64,7 @@ async def get_position_by_position_id(
     # (_id가 빈 문자열("")로 들어오면 두 분기 모두 타지 못해 data 변수가
     #  만들어지지 않는 채로 return되어 오류가 나던 것을 방지)
     if _id is None:
+        print("111111")
         data = await db[COLLECTION_NAME].find_one({"position_id": position_id})
     else:
         data = await db[COLLECTION_NAME].find_one(
