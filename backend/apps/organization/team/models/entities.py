@@ -5,10 +5,10 @@ from pydantic import BaseModel, Field
 
 class TeamEntity(BaseModel):
     # 1. 팀(Team) 기본 정보
-    team_id: str  # ERP 팀id
+    team_code: str  # ERP 팀code
     name: str  # 팀명
     dept_id: str | None = Field(default=None)  # 상위 부서id
-    leader_id: str  # 팀장 임직원id
+    leader_id: str | None = Field(default=None)  # 팀장 임직원id
 
     # 2. 팀(Team) 정렬 관련
     status: bool = Field(default=True)  # 현재 사용 여부

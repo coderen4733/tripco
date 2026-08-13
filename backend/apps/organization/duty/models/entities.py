@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 class DutyEntity(BaseModel):
     # 1. 직무(Duty) 기본 정보
-    duty_id: str  # ERP 직무id
+    duty_code: str  # ERP 직무code
     name: str  # 직책명
 
     # 2. 직무(Duty) 정렬 관련

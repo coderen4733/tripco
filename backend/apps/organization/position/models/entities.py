@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 class PositionEntity(BaseModel):
     # 1. 직급/직위(Positon) 기본 정보
-    position_id: str  # ERP 직급/직위id
+    position_code: str  # ERP 직급/직위code
     name: str  # 직급/직위명
 
     # 2. 직급/직위(Positon) 정렬 관련

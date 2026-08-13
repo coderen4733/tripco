@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 
 from fastapi import HTTPException, status
 from motor.motor_asyncio import AsyncIOMotorDatabase
+from redis.asyncio import Redis
 
 from apps.organization.duty import repository as duty_repository
 from apps.organization.duty.models.entities import DutyEntity
@@ -19,21 +20,28 @@ from common.lexorank import LexoRank
 
 # 직무(Duty) 생성(C) API
 async def create_duty(
-    db: AsyncIOMotorDatabase, payload: DutyCreateReq
+    db: AsyncIOMotorDatabase,
+    redis: Redis,
+    payload: DutyCreateReq,
 ) -> DutyCreateRes:
     # 1. Duplicate Check
-    # 1-1. duty_id
-    is_duplicate_duty_id = await duty_repository.get_duty_by_duty_id(
-        db, payload.duty_id, None
+    # 1-1. duty_code
+    is_duplicate_duty_code = await duty_repository.get_duty_by_duty_code(
+        db,
+        payload.duty_code,
+        None,
     )
-    if is_duplicate_duty_id:
+
+    if is_duplicate_duty_code:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="이미 존재하는 duty_id입니다.",
+            detail="이미 존재하는 duty_code입니다.",
         )
     # 1-2. name
     is_duplicate_name = await duty_repository.get_duty_by_name(
-        db, payload.name, None
+        db,
+        payload.name,
+        None,
     )
     if is_duplicate_name:
         raise HTTPException(
@@ -52,15 +60,28 @@ async def create_duty(
     duty_data["order"] = new_order
 
     # 3. Create & Read
+    # 3-1. MongoDB
     duty = DutyEntity(**duty_data)  # **: 풀어서 넣는다는 뜻
-    new_duty_id = await duty_repository.create_duty(db, duty)
-    new_duty = await duty_repository.get_duty_by_id(db, new_duty_id)
-    # 3-1. Read가 되지 않는 경우
+    new_duty_id = await duty_repository.create_duty(
+        db,
+        duty,
+    )
+    new_duty = await duty_repository.get_duty_by_id(
+        db,
+        new_duty_id,
+    )
+    # 3-1-1. Read가 되지 않는 경우
     if not new_duty:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="직무가 저장되지 않았거나, 조회에 실패하였습니다.",
         )
+    # 3-2. Reids
+    await duty_repository.create_duty_redis(
+        redis,
+        str(new_duty.get("_id")),
+        str(new_duty.get("name")),
+    )
     # 4. Service => Router
     data = DutyCreateRes(**new_duty)
     return data
@@ -73,12 +94,16 @@ async def get_duties_list(
     limit: int,
 ) -> list[DutyReadListRes]:
     # 1. Service <= Repository
-    duties = await duty_repository.get_duties_list(db, skip, limit)
+    duties = await duty_repository.get_duties_list(
+        db,
+        skip,
+        limit,
+    )
     # 2. Service => Router
     data = [
         DutyReadListRes(
             _id=str(duty["_id"]),
-            duty_id=duty["duty_id"],
+            duty_code=duty["duty_code"],
             name=duty["name"],
             status=duty["status"],
             order=duty["order"],
@@ -89,9 +114,15 @@ async def get_duties_list(
 
 
 # 직무(Duty) 상세 조회(R-D) API
-async def get_duty(db: AsyncIOMotorDatabase, _id: str) -> DutyReadDetailRes:
+async def get_duty(
+    db: AsyncIOMotorDatabase,
+    _id: str,
+) -> DutyReadDetailRes:
     # 1. Service <= Repository
-    duty = await duty_repository.get_duty_by_id(db, _id)
+    duty = await duty_repository.get_duty_by_id(
+        db,
+        _id,
+    )
     # 2. Existing Check(404)
     if duty is None:
         raise HTTPException(
@@ -105,43 +136,57 @@ async def get_duty(db: AsyncIOMotorDatabase, _id: str) -> DutyReadDetailRes:
 
 # 직무(Duty) 수정(U) API
 async def update_duty(
-    db: AsyncIOMotorDatabase, _id: str, payload: DutyUpdateReq
+    db: AsyncIOMotorDatabase,
+    redis: Redis,
+    _id: str,
+    payload: DutyUpdateReq,
 ) -> DutyUpdateRes:
-    # 0. Duplicate Check
-    # 0-1. duty_id
-    is_duplicate_duty_id = await duty_repository.get_duty_by_duty_id(
-        db, payload.duty_id, _id
+    # 1. Duplicate Check
+    # 1-1. duty_code
+    is_duplicate_duty_code = await duty_repository.get_duty_by_duty_code(
+        db,
+        payload.duty_code,
+        _id,
     )
-    if is_duplicate_duty_id:
+
+    if is_duplicate_duty_code:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="이미 존재하는 duty_id입니다.",
+            detail="이미 존재하는 duty_code입니다.",
         )
-    # 0-2. name
+    # 1-2. name
     is_duplicate_name = await duty_repository.get_duty_by_name(
-        db, payload.name, _id
+        db,
+        payload.name,
+        _id,
     )
     if is_duplicate_name:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="이미 존재하는 직무명입니다.",
         )
-    # 1. Service <= Repository
+    # 2. Service <= Repository
     updated_duty = await duty_repository.update_duty(
         db,
         _id,
         {
-            "duty_id": payload.duty_id,
+            "duty_code": payload.duty_code,
             "name": payload.name,
             "updated_at": datetime.now(timezone.utc),
         },
     )
-    # 2. Existing Check(404)
+    # 2-1. Existing Check(404)
     if updated_duty.matched_count == 0:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="수정할 직무가 존재하지 않습니다.",
         )
+    # 2-2. Redis
+    await duty_repository.update_duty_redis(
+        redis,
+        _id,
+        payload.name,
+    )
     # 3. Service => Router
     data = DutyUpdateRes(
         matched_count=updated_duty.matched_count,
@@ -152,21 +197,34 @@ async def update_duty(
 
 
 # 직무(Duty) 삭제(D) API
-async def delete_duty(db: AsyncIOMotorDatabase, _id: str) -> DutyDeleteRes:
+async def delete_duty(
+    db: AsyncIOMotorDatabase,
+    redis: Redis,
+    _id: str,
+) -> DutyDeleteRes:
     # 1. Service <= Repository
-    deleted_duty = await duty_repository.delete_duty(db, _id)
-    # 2. Cannot Delete(500)
+    deleted_duty = await duty_repository.delete_duty(
+        db,
+        _id,
+    )
+    # 2. MongoDB
+    # 2-1. Cannot Delete(500)
     if deleted_duty.acknowledged is False:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="직무 삭제에 실패했습니다.",
         )
-    # 3. Existing Check(404)
+    # 2-2. Existing Check(404)
     if deleted_duty.deleted_count == 0:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="삭제할 직무가 존재하지 않습니다.",
         )
+    # 3. Redis
+    await duty_repository.delete_duty_redis(
+        redis,
+        _id,
+    )
     # 4. Service => Router
     data = DutyDeleteRes(
         deleted_count=deleted_duty.deleted_count,

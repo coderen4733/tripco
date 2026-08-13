@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 class EmploymentTypeEntity(BaseModel):
     # 1. 고용형태(EmploymentType) 기본 정보
-    type_id: str  # ERP 고용형태id
+    type_code: str  # ERP 고용형태code
     type: str  # 고용형태
 
     # 2. 고용형태(EmploymentType) 정렬 관련

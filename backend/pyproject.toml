@@ -15,7 +15,8 @@ dependencies = [
     "bcrypt (>=5.0.0,<6.0.0)",
     "pyjwt (>=2.13.0,<3.0.0)",
     "boto3 (>=1.43.47,<2.0.0)",
-    "python-multipart (>=0.0.32,<0.0.33)"
+    "python-multipart (>=0.0.32,<0.0.33)",
+    "redis (>=8.0.1,<9.0.0)"
 ]
 
 

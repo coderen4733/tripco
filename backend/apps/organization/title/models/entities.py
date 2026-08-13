@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 class TitleEntity(BaseModel):
     # 1. 직책(Title) 기본 정보
-    title_id: str  # ERP 직책id
+    title_code: str  # ERP 직책code
     name: str  # 직책명
 
     # 2. 직책(Title) 정렬 관련

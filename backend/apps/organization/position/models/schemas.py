@@ -5,15 +5,15 @@ from pydantic import BaseModel, Field
 
 # 직급/직위(Positon) 생성(C) API - 요청(Req)
 class PositionCreateReq(BaseModel):
-    position_id: str = Field(
+    position_code: str = Field(
         ..., min_length=1, example="MNG"
-    )  # ERP 직급/직위id
+    )  # ERP 직급/직위code
     name: str = Field(..., min_length=1, example="과장")  # 직급/직위명
 
 
 # 직급/직위(Positon) 생성(C) API - 응답(Res)
 class PositionCreateRes(BaseModel):
-    position_id: str  # ERP 직급/직위id
+    position_code: str  # ERP 직급/직위code
     name: str  # 직급/직위명
     status: bool  # 현재 사용 여부
     order: str  # 배열 순서
@@ -23,7 +23,7 @@ class PositionCreateRes(BaseModel):
 # 직급/직위(Positon) 목록 조회(R-L) API - 응답(Res)
 class PositionReadListRes(BaseModel):
     id: str = Field(..., alias="_id")  # MongoDB id
-    position_id: str  # ERP 직급/직위id
+    position_code: str  # ERP 직급/직위code
     name: str  # 직급/직위명
     status: bool  # 현재 사용 여부
     order: str  # 배열 순서
@@ -31,7 +31,7 @@ class PositionReadListRes(BaseModel):
 
 # 직급/직위(Positon) 상세 조회(R-D) API - 응답(Res)
 class PositionReadDetailRes(BaseModel):
-    position_id: str  # ERP 직급/직위id
+    position_code: str  # ERP 직급/직위code
     name: str  # 직급/직위명
     status: bool  # 현재 사용 여부
     order: str  # 배열 순서
@@ -41,9 +41,9 @@ class PositionReadDetailRes(BaseModel):
 
 # 직급/직위(Positon) 수정(U) API - 요청(Req)
 class PositionUpdateReq(BaseModel):
-    position_id: str = Field(
+    position_code: str = Field(
         ..., min_length=1, example="MNG"
-    )  # ERP 직급/직위id
+    )  # ERP 직급/직위code
     name: str = Field(..., min_length=1, example="과장")  # 직급/직위명
 
 

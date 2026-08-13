@@ -5,13 +5,15 @@ from pydantic import BaseModel, Field
 
 # 고용형태(EmploymentType) 생성(C) API - 요청(Req)
 class EmpTypeCreateReq(BaseModel):
-    type_id: str = Field(..., min_length=1, example="REG")  # ERP 고용형태id
+    type_code: str = Field(
+        ..., min_length=1, example="REG"
+    )  # ERP 고용형태code
     type: str = Field(..., min_length=1, example="정규직")  # 고용형태
 
 
 # 고용형태(EmploymentType) 생성(C) API - 응답(Res)
 class EmpTypeCreateRes(BaseModel):
-    type_id: str  # ERP 고용형태id
+    type_code: str  # ERP 고용형태code
     type: str  # 고용형태
     status: bool  # 현재 사용 여부
     order: str  # 배열 순서
@@ -21,7 +23,7 @@ class EmpTypeCreateRes(BaseModel):
 # 고용형태(EmploymentType) 목록 조회(R-L) API - 응답(Res)
 class EmpTypeReadListRes(BaseModel):
     id: str = Field(..., alias="_id")  # MongoDB id
-    type_id: str  # ERP 고용형태id
+    type_code: str  # ERP 고용형태code
     type: str  # 고용형태
     status: bool  # 현재 사용 여부
     order: str  # 배열 순서
@@ -29,7 +31,7 @@ class EmpTypeReadListRes(BaseModel):
 
 # 고용형태(EmploymentType) 상세 조회(R-D) API - 응답(Res)
 class EmpTypeReadDetailRes(BaseModel):
-    type_id: str  # ERP 고용형태id
+    type_code: str  # ERP 고용형태code
     type: str  # 고용형태
     status: bool  # 현재 사용 여부
     order: str  # 배열 순서
@@ -39,7 +41,9 @@ class EmpTypeReadDetailRes(BaseModel):
 
 # 고용형태(EmploymentType) 수정(U) API - 요청(Req)
 class EmpTypeUpdateReq(BaseModel):
-    type_id: str = Field(..., min_length=1, example="REG")  # ERP 고용형태id
+    type_code: str = Field(
+        ..., min_length=1, example="REG"
+    )  # ERP 고용형태code
     type: str = Field(..., min_length=1, example="정규직")  # 고용형태
 
 

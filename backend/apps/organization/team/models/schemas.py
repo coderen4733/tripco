@@ -5,15 +5,15 @@ from pydantic import BaseModel, Field
 
 # 팀(Team) 생성(C) API - 요청(Req)
 class TeamCreateReq(BaseModel):
-    team_id: str = Field(..., min_length=1, example="TES")  # ERP 팀id
+    team_code: str = Field(..., min_length=1, example="TES")  # ERP 팀code
     name: str = Field(..., min_length=1, example="테스트팀")  # 팀명
-    leader_id: str = Field(..., example="")  # 팀장 임직원id
-    dept_id: str = Field(..., example="")  # 상위 부서id
+    leader_id: str | None = Field(default=None)  # 팀장 임직원id
+    dept_id: str | None = Field(default=None)  # 상위 부서id
 
 
 # 팀(Team) 생성(C) API - 응답(Res)
 class TeamCreateRes(BaseModel):
-    team_id: str  # ERP 팀id
+    team_code: str  # ERP 팀code
     name: str  # 팀명
     leader_id: str | None  # 팀장 임직원id
     dept_id: str | None  # 상위 부서id
@@ -25,7 +25,7 @@ class TeamCreateRes(BaseModel):
 # 팀(Team) 목록 조회(R-L) API - 응답(Res)
 class TeamReadListRes(BaseModel):
     id: str = Field(..., alias="_id")  # MongoDB id
-    team_id: str  # ERP 팀id
+    team_code: str  # ERP 팀code
     name: str  # 팀명
     leader_id: str | None  # 팀장 임직원id
     status: bool  # 현재 사용 여부
@@ -34,7 +34,7 @@ class TeamReadListRes(BaseModel):
 
 # 팀(Team) 상세 조회(R-D) API - 응답(Res)
 class TeamReadDetailRes(BaseModel):
-    team_id: str  # ERP 팀id
+    team_code: str  # ERP 팀code
     name: str  # 팀명
     leader_id: str | None  # 팀장 임직원id
     dept_id: str | None  # 상위 부서id
@@ -46,10 +46,10 @@ class TeamReadDetailRes(BaseModel):
 
 # 팀(Team) 수정(U) API - 요청(Req)
 class TeamUpdateReq(BaseModel):
-    team_id: str = Field(..., min_length=1, example="TES")  # ERP 팀id
+    team_code: str = Field(..., min_length=1, example="TES")  # ERP 팀code
     name: str = Field(..., min_length=1, example="테스트팀")  # 팀명
-    leader_id: str = Field(..., example="")  # 팀장 임직원id
-    dept_id: str = Field(..., example="")  # 상위 부서id
+    leader_id: str | None = Field(default=None)  # 팀장 임직원id
+    dept_id: str | None = Field(default=None)  # 상위 부서id
 
 
 # 팀(Team) 수정(U) API - 응답(Res)

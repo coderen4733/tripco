@@ -1,15 +1,22 @@
 from contextlib import asynccontextmanager  # Lifespan 생성에 사용할 contextlib
 
-from fastapi import FastAPI  # FastAPI로 Back-End 구성
+import redis.asyncio as aioredis  # Async Redis 라이브러리 추가
+from fastapi import Depends, FastAPI  # FastAPI로 Back-End 구성
 from fastapi.middleware.cors import (
     CORSMiddleware,  # CORS 설정을 위한 Middleware
 )
 from motor.motor_asyncio import (
     AsyncIOMotorClient,  # MongoDB 연결에 사용할 motor
 )
+from redis.asyncio import Redis
 
 from apps.api import api_router  # Router 등록
-from core.config import MONGODB_DB, MONGODB_URL  # .env 환경변수 로드
+from core.config import (  # .env 환경변수 로드
+    MONGODB_DB,
+    MONGODB_URL,
+    REDIS_URL,
+)
+from core.redis import get_redis
 
 
 # APP Lifespan ❤️
@@ -19,6 +26,7 @@ async def lifespan(app: FastAPI):
     # A. [Startup] 앱이 켜질 때 실행
     app.mongodb_client = AsyncIOMotorClient(MONGODB_URL)
     app.mongodb = app.mongodb_client.get_database(MONGODB_DB)
+    app.redis = aioredis.from_url(REDIS_URL, decode_responses=True)
     try:
         # A-1. MongoDB 연결 성공
         await app.mongodb_client.admin.command("ping")
@@ -39,11 +47,21 @@ async def lifespan(app: FastAPI):
     # A-3. MongoDB 연결 실패
     except Exception as err:
         print(f"MongoDB 연결에 실패했습니다. {err}")
-    # A-4. App 실행
+
+    # A-4. Redis Cloud 연결
+    try:
+        await app.redis.ping()
+        print("Redis Cloud 연결에 성공했습니다.")
+    except Exception as err:
+        print(f"Redis Cloud 연결에 실패했습니다. {err}")
+
+    # A-5. App 실행
     yield
     # B. [Shutdown] 앱이 꺼질 때 실행
     app.mongodb_client.close()
     print("MongoDB 연결이 종료되었습니다.")
+    await app.redis.aclose()
+    print("Redis Cloud 연결이 종료되었습니다.")
 
 
 # L-2. FastAPI 인스턴스 생성 시 lifespan(L-1)을 따름
@@ -66,6 +84,26 @@ async def health_check():
     return {
         "status": "healthy",
     }
+
+
+# Redis Check API ✅
+@app.get("/redis-check", tags=["Redis Check"])
+async def redis_check(redis: Redis = Depends(get_redis)):
+    try:
+        # 1. Redis에 'health' -> 'check' 저장 (Redis Insight에서 확인 가능)
+        await redis.set("health", "check")
+
+        # 2. 'health' 키를 검색해서 값을 받아옴
+        value = await redis.get("health")
+
+        # 3. 값이 'check'로 정상 수신되면 healthy
+        if value == "check":
+            return {"redis_status": "healthy"}
+        else:
+            return {"redis_status": "sick"}
+    # 4. 연결 실패 등 예외 발생 시 ill
+    except Exception:
+        return {"redis_status": "ill"}
 
 
 # APP Router 등록 🚥

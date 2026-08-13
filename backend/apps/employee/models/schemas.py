@@ -9,7 +9,6 @@ from apps.employee.models.enums import (
     ExpLevel,
     Gender,
 )
-from common.organization import DefaultOrgId
 
 
 # 임직원(Employee) 생성(C) API - 요청(Req)
@@ -28,18 +27,23 @@ class EmployeeCreateReq(BaseModel):
     profile_image_url: str | None = Field(default=None)
     phone_number: str = Field(example="010-1234-1234")
     address: str | None = Field(default=None)
-    email: str = Field(..., min_length=7, example="test@naver.com")
+    email: str = Field(min_length=7, example="test@naver.com")
     email_company: str | None = Field(default=None)
     desk_number: str | None = Field(default=None)
 
     # 2. 인사
+    # [DefaultOrgId 삭제] 예전에는 미배정 상태를 하드코딩된 _id(예: "소속없음"
+    # 부서의 임시 _id)로 채워 넣었지만, 그 값이 Redis 마스터컬렉션과
+    # 어긋나 있었다. 이제는 그냥 None(미지정)으로 두고, 실제 배정된
+    # 뒤에는 프론트엔드가 GET /organizations/master-maps/로 받아온
+    # 최신 데이터를 기준으로 이름을 표시한다.
     employee_id: str = Field(min_length=8, example="20260217")
-    dept_id: str | None = Field(default=DefaultOrgId.NO_DEPT)
-    team_id: str | None = Field(default=DefaultOrgId.NO_TEAM)
-    position_id: str | None = Field(default=DefaultOrgId.NO_POSITION)
-    title_id: str | None = Field(default=DefaultOrgId.NO_TITLE)
-    duty_id: str | None = Field(default=DefaultOrgId.NO_DUTY)
-    employment_type: str | None = Field(default=DefaultOrgId.NO_EMP_TYPE)
+    dept_id: str | None = Field(default=None)
+    team_id: str | None = Field(default=None)
+    position_id: str | None = Field(default=None)
+    title_id: str | None = Field(default=None)
+    duty_id: str | None = Field(default=None)
+    employment_type: str | None = Field(default=None)
     exp_level: ExpLevel | None = Field(default=ExpLevel.NEW)
 
     # 3. 보유능력
@@ -67,6 +71,68 @@ class EmployeeCreateRes(BaseModel):
     id: str = Field(..., alias="_id")
 
 
+# 임직원(Employee) 수정(U) API - 요청(Req)
+# 상세 조회 화면에서 항목 하나씩 수정 후 저장하는 방식(부분 수정)을 지원하기
+# 위해 모든 필드를 선택값으로 둔다. 실제로 요청에 담겨 온 필드만 반영되고,
+# 나머지 필드는 건드리지 않는다.
+# (서비스에서 model_dump(exclude_unset=True)로 판단)
+class EmployeeUpdateReq(BaseModel):
+    # 0. ERP 정보
+    login_id: str | None = Field(default=None, min_length=3)
+    admin_role: AdminRole | None = Field(default=None)
+
+    # 1. 기본 정보
+    name_kor: str | None = Field(default=None, min_length=2)
+    name_eng: str | None = Field(default=None, min_length=2)
+    name_jpn: str | None = Field(default=None)
+    name_chn: str | None = Field(default=None)
+    gender: Gender | None = Field(default=None)
+    birth_date: str | None = Field(default=None, min_length=10, max_length=10)
+    phone_number: str | None = Field(default=None)
+    address: str | None = Field(default=None)
+    email: str | None = Field(default=None, min_length=7)
+    email_company: str | None = Field(default=None)
+    desk_number: str | None = Field(default=None)
+
+    # 2. 인사
+    employee_id: str | None = Field(default=None, min_length=8)
+    dept_id: str | None = Field(default=None)
+    team_id: str | None = Field(default=None)
+    position_id: str | None = Field(default=None)
+    title_id: str | None = Field(default=None)
+    duty_id: str | None = Field(default=None)
+    employment_type: str | None = Field(default=None)
+    exp_level: ExpLevel | None = Field(default=None)
+
+    # 3. 보유능력
+    driver_license_type: DriverLicenseType | None = Field(default=None)
+    owned_vehicle: str | None = Field(default=None)
+    owned_vehicle_number: str | None = Field(default=None)
+    languages: list[LanguageSkill] | None = Field(default=None)
+
+
+# 임직원(Employee) 수정(U) API - 응답(Res)
+class EmployeeUpdateRes(BaseModel):
+    matched_count: int  # 쿼리 조건에 매칭된 문서 개수 (최대 1)
+    modified_count: int  # 실제 데이터가 변경된 문서 개수 (최대 1)
+    acknowledged: bool  # 쓰기 작업이 정상적으로 반영되었는지 여부
+
+
+# 임직원(Employee) 목록 조회(R-L) API - 응답(Res)
+class EmployeeReadListRes(BaseModel):
+    id: str = Field(..., alias="_id")  # MongoDB id
+    name_kor: str  # 성명(한국어)
+    employee_id: str  # 사번
+    login_id: str  # ERP 로그인id
+    # [DefaultOrgId 삭제] 미배정 상태를 None으로 허용하므로 전부 Optional
+    dept_id: str | None  # 부서id
+    team_id: str | None  # 팀id
+    position_id: str | None  # 직급id
+    title_id: str | None  # 직책id
+    duty_id: str | None  # 직무id
+    employment_type: str | None  # 고용형태id
+
+
 # 임직원(Employee) 상세 조회(R-D) API - 응답(Res)
 class EmployeeReadDetailRes(BaseModel):
     # 0. ERP 정보
@@ -83,20 +149,20 @@ class EmployeeReadDetailRes(BaseModel):
     birth_date: str  # 생년월일
     profile_image_url: str | None  # 프로필 사진 url(S3)
     phone_number: str  # 휴대폰 번호
-    address: str  # 거주지 주소
+    address: str | None  # 거주지 주소
     email: str  # 개인 이메일
     email_company: str | None  # 회사 이메일
     desk_number: str | None  # 데스크 직통 전화번호
 
     # 2. 인사
     employee_id: str  # 사번
-    dept_id: str = DefaultOrgId.NO_DEPT  # 부서id
-    team_id: str = DefaultOrgId.NO_TEAM  # 팀id
-    position_id: str = DefaultOrgId.NO_POSITION  # 직급/직위id
-    title_id: str = DefaultOrgId.NO_TITLE  # 직책id
-    duty_id: str = DefaultOrgId.NO_DUTY  # 직무id
-    employment_type: str = DefaultOrgId.NO_EMP_TYPE  # 고용형태id
-    exp_level: ExpLevel = ExpLevel.NEW  # 신입/경력 여부
+    dept_id: str | None  # 부서id
+    team_id: str | None  # 팀id
+    position_id: str | None  # 직급/직위id
+    title_id: str | None  # 직책id
+    duty_id: str | None  # 직무id
+    employment_type: str | None  # 고용형태id
+    exp_level: ExpLevel | None  # 신입/경력 여부
     created_at: datetime  # 입사일
     updated_at: datetime  # 수정일
     deleted_at: datetime | None  # 퇴사일

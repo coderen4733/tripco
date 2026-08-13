@@ -5,13 +5,13 @@ from pydantic import BaseModel, Field
 
 # 직무(Duty) 생성(C) API - 요청(Req)
 class DutyCreateReq(BaseModel):
-    duty_id: str = Field(..., min_length=1, example="GUD")  # ERP 직무id
+    duty_code: str = Field(..., min_length=1, example="GUD")  # ERP 직무code
     name: str = Field(..., min_length=1, example="가이드")  # 직무명
 
 
 # 직무(Duty) 생성(C) API - 응답(Res)
 class DutyCreateRes(BaseModel):
-    duty_id: str  # ERP 직무id
+    duty_code: str  # ERP 직무code
     name: str  # 직무명
     status: bool  # 현재 사용 여부
     order: str  # 배열 순서
@@ -21,7 +21,7 @@ class DutyCreateRes(BaseModel):
 # 직무(Duty) 목록 조회(R-L) API - 응답(Res)
 class DutyReadListRes(BaseModel):
     id: str = Field(..., alias="_id")  # MongoDB id
-    duty_id: str  # ERP 직무id
+    duty_code: str  # ERP 직무code
     name: str  # 직무명
     status: bool  # 현재 사용 여부
     order: str  # 배열 순서
@@ -29,7 +29,7 @@ class DutyReadListRes(BaseModel):
 
 # 직무(Duty) 상세 조회(R-D) API - 응답(Res)
 class DutyReadDetailRes(BaseModel):
-    duty_id: str  # ERP 직무id
+    duty_code: str  # ERP 직무code
     name: str  # 직무명
     status: bool  # 현재 사용 여부
     order: str  # 배열 순서
@@ -39,7 +39,7 @@ class DutyReadDetailRes(BaseModel):
 
 # 직무(Duty) 수정(U) API - 요청(Req)
 class DutyUpdateReq(BaseModel):
-    duty_id: str = Field(..., min_length=1, example="GUD")  # ERP 직무id
+    duty_code: str = Field(..., min_length=1, example="GUD")  # ERP 직무code
     name: str = Field(..., min_length=1, example="가이드")  # 직무명
 
 

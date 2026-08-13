@@ -5,14 +5,14 @@ from pydantic import BaseModel, Field
 
 # 부서(Department) 생성(C) API - 요청(Req)
 class DeptCreateReq(BaseModel):
-    dept_id: str = Field(..., min_length=1, example="SMD")  # ERP 부서id
-    name: str = Field(..., min_length=1, example="세일즈마케팅부")  # 부서명
-    leader_id: str = Field(..., example="")  # 부서장 임직원id
+    dept_code: str = Field(..., min_length=1, example="TES")  # ERP 부서code
+    name: str = Field(..., min_length=1, example="테스트부")  # 부서명
+    leader_id: str | None = Field(default=None)  # 부서장 임직원id
 
 
 # 부서(Department) 생성(C) API - 응답(Res)
 class DeptCreateRes(BaseModel):
-    dept_id: str  # ERP 부서id
+    dept_code: str  # ERP 부서code
     name: str  # 부서명
     leader_id: str | None  # 부서장 임직원id
     hq_id: str | None  # 상위 본부id
@@ -24,7 +24,7 @@ class DeptCreateRes(BaseModel):
 # 부서(Department) 목록 조회(R-L) API - 응답(Res)
 class DeptReadListRes(BaseModel):
     id: str = Field(..., alias="_id")  # MongoDB id
-    dept_id: str  # ERP 부서id
+    dept_code: str  # ERP 부서code
     name: str  # 부서명
     leader_id: str | None  # 부서장 임직원id
     status: bool  # 현재 사용 여부
@@ -33,7 +33,7 @@ class DeptReadListRes(BaseModel):
 
 # 부서(Department) 상세 조회(R-D) API - 응답(Res)
 class DeptReadDetailRes(BaseModel):
-    dept_id: str  # ERP 부서id
+    dept_code: str  # ERP 부서code
     name: str  # 부서명
     leader_id: str | None  # 부서장 임직원id
     hq_id: str | None  # 상위 본부id
@@ -45,10 +45,10 @@ class DeptReadDetailRes(BaseModel):
 
 # 부서(Department) 수정(U) API - 요청(Req)
 class DeptUpdateReq(BaseModel):
-    dept_id: str = Field(..., min_length=1, example="SMD")  # ERP 부서id
-    name: str = Field(..., min_length=1, example="세일즈마케팅부")  # 부서명
-    leader_id: str = Field(..., example="")  # 부서장 임직원id
-    hq_id: str = Field(..., example="")  # 상위 본부id
+    dept_code: str = Field(..., min_length=1, example="TES")  # ERP 부서code
+    name: str = Field(..., min_length=1, example="테스트부")  # 부서명
+    leader_id: str | None = Field(default=None)  # 부서장 임직원id
+    hq_id: str | None = Field(default=None)  # 상위 본부id
 
 
 # 부서(Department) 수정(U) API - 응답(Res)

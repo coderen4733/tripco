@@ -9,6 +9,9 @@ load_dotenv()
 MONGODB_URL = os.getenv("MONGODB_URL")
 MONGODB_DB = os.getenv("MONGODB_DB")
 
+# REDIS 관련
+REDIS_URL = os.getenv("REDIS_URL")
+
 # JWT 관련 🔐
 JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 ACCESS_TOKEN_SECRET = os.getenv("ACCESS_TOKEN_SECRET")

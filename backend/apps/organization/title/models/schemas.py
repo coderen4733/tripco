@@ -5,13 +5,13 @@ from pydantic import BaseModel, Field
 
 # 직책(Title) 생성(C) API - 요청(Req)
 class TitleCreateReq(BaseModel):
-    title_id: str = Field(..., min_length=1, example="TML")  # ERP 직책id
+    title_code: str = Field(..., min_length=1, example="TML")  # ERP 직책code
     name: str = Field(..., min_length=1, example="팀장")  # 직책명
 
 
 # 직책(Title) 생성(C) API - 응답(Res)
 class TitleCreateRes(BaseModel):
-    title_id: str  # ERP 직책id
+    title_code: str  # ERP 직책code
     name: str  # 직책명
     status: bool  # 현재 사용 여부
     order: str  # 배열 순서
@@ -21,7 +21,7 @@ class TitleCreateRes(BaseModel):
 # 직책(Title) 목록 조회(R-L) API - 응답(Res)
 class TitleReadListRes(BaseModel):
     id: str = Field(..., alias="_id")  # MongoDB id
-    title_id: str  # ERP 직책id
+    title_code: str  # ERP 직책code
     name: str  # 직책명
     status: bool  # 현재 사용 여부
     order: str  # 배열 순서
@@ -29,7 +29,7 @@ class TitleReadListRes(BaseModel):
 
 # 직책(Title) 상세 조회(R-D) API - 응답(Res)
 class TitleReadDetailRes(BaseModel):
-    title_id: str  # ERP 직책id
+    title_code: str  # ERP 직책code
     name: str  # 직책명
     status: bool  # 현재 사용 여부
     order: str  # 배열 순서
@@ -39,7 +39,7 @@ class TitleReadDetailRes(BaseModel):
 
 # 직책(Title) 수정(U) API - 요청(Req)
 class TitleUpdateReq(BaseModel):
-    title_id: str = Field(..., min_length=1, example="TML")  # ERP 직책id
+    title_code: str = Field(..., min_length=1, example="TML")  # ERP 직책code
     name: str = Field(..., min_length=1, example="팀장")  # 직책명
 
 

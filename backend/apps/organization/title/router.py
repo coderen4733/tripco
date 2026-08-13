@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, status
 from motor.motor_asyncio import AsyncIOMotorDatabase
+from redis.asyncio import Redis
 
 from apps.organization.title import service as title_service
 from apps.organization.title.models.schemas import (
@@ -13,12 +14,12 @@ from apps.organization.title.models.schemas import (
 )
 from common.response import ResponseSchema
 from core.database import get_database
+from core.redis import get_redis
 
 title_router = APIRouter()
 
 
 # 직책(Title) 생성(C) API
-# [수정] "팀(Team)"으로 잘못 적혀있던 주석을 "직책(Title)"로 수정함
 @title_router.post(
     "/",
     response_model=ResponseSchema[TitleCreateRes],
@@ -27,24 +28,42 @@ title_router = APIRouter()
 async def create_title(
     payload: TitleCreateReq,
     db: AsyncIOMotorDatabase = Depends(get_database),
+    redis: Redis = Depends(get_redis),
 ) -> dict:
     # 1. Router <= Service
-    data = await title_service.create_title(db, payload)
+    data = await title_service.create_title(
+        db,
+        redis,
+        payload,
+    )
     # 2. Router => FrontEnd
-    return {"message": "직책 생성에 성공했습니다.", "data": data}
+    return {
+        "message": "직책 생성에 성공했습니다.",
+        "data": data,
+    }
 
 
 # 직책(Title) 목록 조회(R-L) API
-@title_router.get("/", response_model=ResponseSchema[list[TitleReadListRes]])
+@title_router.get(
+    "/",
+    response_model=ResponseSchema[list[TitleReadListRes]],
+)
 async def get_titles_list(
     skip: int = 0,
     limit: int = 20,
     db: AsyncIOMotorDatabase = Depends(get_database),
 ):
     # 1. Router <= Service
-    data = await title_service.get_titles_list(db, skip, limit)
+    data = await title_service.get_titles_list(
+        db,
+        skip,
+        limit,
+    )
     # 2. Router => FrontEnd
-    return {"message": "직책 목록 조회에 성공했습니다.", "data": data}
+    return {
+        "message": "직책 목록 조회에 성공했습니다.",
+        "data": data,
+    }
 
 
 # 직책(Title) 상세 조회(R-D) API
@@ -58,22 +77,40 @@ async def get_title(
     db: AsyncIOMotorDatabase = Depends(get_database),
 ) -> dict:
     # 1. Router <= Service
-    data = await title_service.get_title(db, _id)
+    data = await title_service.get_title(
+        db,
+        _id,
+    )
     # 2. Router => FrontEnd
-    return {"message": "직책 상세 조회에 성공했습니다.", "data": data}
+    return {
+        "message": "직책 상세 조회에 성공했습니다.",
+        "data": data,
+    }
 
 
 # 직책(Title) 수정(U) API
-@title_router.put("/{_id}", response_model=ResponseSchema[TitleUpdateRes])
+@title_router.put(
+    "/{_id}",
+    response_model=ResponseSchema[TitleUpdateRes],
+)
 async def update_title(
     _id: str,
     payload: TitleUpdateReq,
     db: AsyncIOMotorDatabase = Depends(get_database),
+    redis: Redis = Depends(get_redis),
 ) -> dict:
     # 1. Router <= Service
-    data = await title_service.update_title(db, _id, payload)
+    data = await title_service.update_title(
+        db,
+        redis,
+        _id,
+        payload,
+    )
     # 2. Router => FrontEnd
-    return {"message": "직책 수정에 성공했습니다.", "data": data}
+    return {
+        "message": "직책 수정에 성공했습니다.",
+        "data": data,
+    }
 
 
 # 직책(Title) 삭제(D) API
@@ -83,9 +120,18 @@ async def update_title(
     status_code=status.HTTP_200_OK,
 )
 async def delete_title(
-    _id: str, db: AsyncIOMotorDatabase = Depends(get_database)
+    _id: str,
+    db: AsyncIOMotorDatabase = Depends(get_database),
+    redis: Redis = Depends(get_redis),
 ) -> dict:
     # 1. Router <= Service
-    data = await title_service.delete_title(db, _id)
+    data = await title_service.delete_title(
+        db,
+        redis,
+        _id,
+    )
     # 2. Router => FrontEnd
-    return {"message": "직책 삭제에 성공했습니다.", "data": data}
+    return {
+        "message": "직책 삭제에 성공했습니다.",
+        "data": data,
+    }

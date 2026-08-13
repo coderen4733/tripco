@@ -5,10 +5,10 @@ from pydantic import BaseModel, Field
 
 class DepartmentEntity(BaseModel):
     # 1. 부서(Department) 기본 정보
-    dept_id: str  # ERP 부서id
+    dept_code: str  # ERP 부서code
     name: str  # 부서명
     hq_id: str | None = Field(default=None)  # 상위 본부id
-    leader_id: str  # 부서장 임직원id
+    leader_id: str | None = Field(default=None)  # 부서장 임직원id
 
     # 2. 부서(Department) 정렬 관련
     status: bool = Field(default=True)  # 현재 사용 여부

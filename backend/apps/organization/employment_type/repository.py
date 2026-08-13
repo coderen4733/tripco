@@ -2,6 +2,7 @@ from bson import ObjectId  # MongoDB 문서 id(_id) 타입을 다루는 라이�
 from fastapi import HTTPException, status
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pymongo.errors import DuplicateKeyError
+from redis.asyncio import Redis
 
 from apps.organization.employment_type.models.entities import (
     EmploymentTypeEntity,
@@ -11,24 +12,46 @@ from apps.organization.employment_type.models.entities import (
 COLLECTION_NAME = "mst_employment_types"
 
 
-# 고용형태(EmploymentType) 생성(C) API
+# 고용형태(EmploymentType) 생성(C) API - MongoDB
 async def create_emp_type(
-    db: AsyncIOMotorDatabase, emp_type: EmploymentTypeEntity
+    db: AsyncIOMotorDatabase,
+    emp_type: EmploymentTypeEntity,
 ) -> str:
     try:
         # 1. Repository => DB
-        data = await db[COLLECTION_NAME].insert_one(emp_type.model_dump())
+        data = await db[COLLECTION_NAME].insert_one(
+            emp_type.model_dump(),
+        )
         # 2. Repository => Service
         return str(data.inserted_id)
     except DuplicateKeyError:
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail="중복된 _id입니다."
+            status_code=status.HTTP_409_CONFLICT,
+            detail="중복된 _id입니다.",
         )
 
 
-# 고용형태(EmploymentType) 목록 조회(R-L) API
+# 고용형태(EmploymentType) 생성(C) API - Redis
+async def create_emp_type_redis(
+    redis: Redis,
+    field: str,
+    value: str,
+) -> None:
+    # 1. Repository => Redis
+    await redis.hset(
+        COLLECTION_NAME,
+        field,
+        value,
+    )
+    # 2. Repository => Service
+    return
+
+
+# 고용형태(EmploymentType) 목록 조회(R-L) API - MongoDB
 async def get_emp_types_list(
-    db: AsyncIOMotorDatabase, skip: int, limit: int
+    db: AsyncIOMotorDatabase,
+    skip: int,
+    limit: int,
 ) -> list[dict]:
     # 0. skip/limit으로 페이지네이션
     cursor = (
@@ -44,55 +67,70 @@ async def get_emp_types_list(
     return data
 
 
-# 고용형태(EmploymentType) 상세 조회(R-D) API (by _id)
+# 고용형태(EmploymentType) 상세 조회(R-D) API (by _id) - MongoDB
 async def get_emp_type_by_id(
-    db: AsyncIOMotorDatabase, _id: str
+    db: AsyncIOMotorDatabase,
+    _id: str,
 ) -> dict | None:
     # 0. Validation
     if not ObjectId.is_valid(_id):
         return None
     # 1. Repository => DB
-    data = await db[COLLECTION_NAME].find_one({"_id": ObjectId(_id)})
+    data = await db[COLLECTION_NAME].find_one(
+        {"_id": ObjectId(_id)},
+    )
     # 2. Repository => Service
     return data
 
 
-# 고용형태(EmploymentType) 중복 조회(R-D) API (by type_id)
-async def get_emp_type_by_type_id(
-    db: AsyncIOMotorDatabase, type_id: str, _id: str | None
+# 고용형태(EmploymentType) 중복 조회(R-D) API (by type_code)
+async def get_emp_type_by_type_code(
+    db: AsyncIOMotorDatabase,
+    type_code: str,
+    _id: str | None,
 ) -> dict | None:
     # 1. Repository => DB
-    # [수정] "elif _id:"였던 것을 "else:"로 변경함
-    # (_id가 빈 문자열("")로 들어오면 두 분기 모두 타지 못해 data 변수가
-    #  만들어지지 않는 채로 return되어 오류가 나던 것을 방지)
     if _id is None:
-        data = await db[COLLECTION_NAME].find_one({"type_id": type_id})
+        data = await db[COLLECTION_NAME].find_one(
+            {"type_code": type_code},
+        )
     else:
         data = await db[COLLECTION_NAME].find_one(
-            {"_id": {"$ne": ObjectId(_id)}, "type_id": type_id}
+            {
+                "_id": {"$ne": ObjectId(_id)},
+                "type_code": type_code,
+            }
         )
     # 2. Repository => Service
     return data
 
 
-# 고용형태(EmploymentType) 중복 조회(R-D) API (by type)
+# 고용형태(EmploymentType) 중복 조회(R-D) API (by type) - MongoDB
 async def get_emp_type_by_type(
-    db: AsyncIOMotorDatabase, type: str, _id: str | None
+    db: AsyncIOMotorDatabase,
+    type: str,
+    _id: str | None,
 ) -> dict | None:
     # 1. Repository => DB
-    # [수정] "elif _id:"였던 것을 "else:"로 변경함 (사유는 위 함수와 동일)
     if _id is None:
-        data = await db[COLLECTION_NAME].find_one({"type": type})
+        data = await db[COLLECTION_NAME].find_one(
+            {"type": type},
+        )
     else:
         data = await db[COLLECTION_NAME].find_one(
-            {"_id": {"$ne": ObjectId(_id)}, "type": type}
+            {
+                "_id": {"$ne": ObjectId(_id)},
+                "type": type,
+            }
         )
     # 2. Repository => Service
     return data
 
 
-# 고용형태(EmploymentType) 가장 마지막 order 조회(R-D) API (by order)
-async def get_last_emp_type_order(db: AsyncIOMotorDatabase) -> dict | None:
+# 고용형태(EmploymentType) 가장 마지막 order 조회(R-D) API (by order) - MongoDB
+async def get_last_emp_type_order(
+    db: AsyncIOMotorDatabase,
+) -> dict | None:
     # 0. 가장 마지막 order 1개만
     cursor = (
         db[COLLECTION_NAME]
@@ -106,21 +144,59 @@ async def get_last_emp_type_order(db: AsyncIOMotorDatabase) -> dict | None:
     return data[0] if data else None
 
 
-# 고용형태(EmploymentType) 수정(U) API
+# 고용형태(EmploymentType) 수정(U) API - MongoDB
 async def update_emp_type(
-    db: AsyncIOMotorDatabase, _id: str, updated_fields: dict
+    db: AsyncIOMotorDatabase,
+    _id: str,
+    updated_fields: dict,
 ) -> dict:
     # 1. Repository => DB
     data = await db[COLLECTION_NAME].update_one(
-        {"_id": ObjectId(_id)}, {"$set": updated_fields}
+        {"_id": ObjectId(_id)},
+        {"$set": updated_fields},
     )
     # 2. Repository => Service
     return data
 
 
-# 고용형태(EmploymentType) 삭제(D) API
-async def delete_emp_type(db: AsyncIOMotorDatabase, _id: str) -> dict:
+# 고용형태(EmploymentType) 수정(U) API - Redis
+async def update_emp_type_redis(
+    redis: Redis,
+    field: str,
+    value: str,
+) -> None:
+    # 1. Repository => Redis
+    await redis.hset(
+        COLLECTION_NAME,
+        field,
+        value,
+    )
+    # 2. Repository => Service
+    return
+
+
+# 고용형태(EmploymentType) 삭제(D) API - MongoDB
+async def delete_emp_type(
+    db: AsyncIOMotorDatabase,
+    _id: str,
+) -> dict:
     # 1. Repository => DB
-    data = await db[COLLECTION_NAME].delete_one({"_id": ObjectId(_id)})
+    data = await db[COLLECTION_NAME].delete_one(
+        {"_id": ObjectId(_id)},
+    )
     # 2. Repository => Service
     return data
+
+
+# 고용형태(EmploymentType) 삭제(D) API - Redis
+async def delete_emp_type_redis(
+    redis: Redis,
+    field: str,
+) -> None:
+    # 1. Repository => Redis
+    await redis.hdel(
+        COLLECTION_NAME,
+        field,
+    )
+    # 2. Repository => Service
+    return

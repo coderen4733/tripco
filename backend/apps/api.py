@@ -4,6 +4,7 @@ from apps.employee.router import employee_router
 from apps.organization.department.router import dept_router
 from apps.organization.duty.router import duty_router
 from apps.organization.employment_type.router import emp_type_router
+from apps.organization.master.router import master_router
 from apps.organization.position.router import position_router
 from apps.organization.team.router import team_router
 from apps.organization.title.router import title_router
@@ -44,6 +45,13 @@ api_router.include_router(
     emp_type_router,
     prefix="/organizations/employment_types",
     tags=["Mst EmploymentType 고용형태"],
+)
+
+# 1-7. 마스터컬렉션 전체 매핑(부서/팀/직급/직책/직무/고용형태)
+api_router.include_router(
+    master_router,
+    prefix="/organizations/master-maps",
+    tags=["Mst Master 마스터매핑"],
 )
 
 # 2. 임직원(Employee)
