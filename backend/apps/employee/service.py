@@ -1,6 +1,9 @@
 from datetime import datetime, timezone
 
 from fastapi import HTTPException, UploadFile, status
+from fastapi.concurrency import (
+    run_in_threadpool,  # 동기 함수(Pillow 이미지 처리)를 비동기로 실행
+)
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from apps.employee import repository as employee_repository
@@ -8,18 +11,14 @@ from apps.employee.models.entities import EmployeeEntity
 from apps.employee.models.schemas import (
     EmployeeCreateReq,
     EmployeeCreateRes,
+    EmployeeProfileImageRes,
     EmployeeReadDetailRes,
     EmployeeReadListRes,
     EmployeeUpdateReq,
     EmployeeUpdateRes,
 )
-from core.s3 import upload_to_s3
-
-
-# S3에 파일 업로드 => url 변환
-async def upload_to_s3(file: UploadFile, folder: str, employee_id) -> str:
-    # 1. core.s3의 파일 업로드 함수 호출
-    return await upload_to_s3(file, folder, employee_id)
+from core.image import process_profile_image
+from core.s3 import upload_bytes_to_s3
 
 
 # 임직원(Employee) 생성(C) API
@@ -164,3 +163,59 @@ async def update_employee(
         acknowledged=updated_employee.acknowledged,
     )
     return data
+
+
+# 임직원(Employee) 프로필 사진 업로드(U) API
+# 반드시 임직원이 MongoDB에 먼저 저장되어 있어야 호출할 수 있다(사번 conflict
+# 여부가 이미 확정된 뒤라는 뜻). 그래서 사원 추가 화면에서는
+# "1) POST /employees/ 로 생성 → 2) 성공하면 이 API로 사진 업로드"
+# 순서로 두 번에 나눠서 호출한다.
+async def upload_profile_image(
+    db: AsyncIOMotorDatabase,
+    _id: str,
+    file: UploadFile,
+) -> EmployeeProfileImageRes:
+    # 1. 대상 임직원 존재 확인 (S3 파일명에 쓸 사번을 여기서 얻는다)
+    employee = await employee_repository.get_employee_by_id(db, _id)
+    if employee is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="프로필 사진을 등록할 임직원이 존재하지 않습니다.",
+        )
+    # 2. 이미지 파일인지 확인
+    if not (file.content_type or "").startswith("image/"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="이미지 파일만 업로드할 수 있습니다.",
+        )
+    # 3. 원본 이미지를 증명사진 표준 규격(413x531 JPEG)으로 가공
+    # (Pillow 리사이즈는 동기 작업이라 run_in_threadpool로 실행)
+    raw_bytes = await file.read()
+    try:
+        processed_bytes = await run_in_threadpool(
+            process_profile_image, raw_bytes
+        )
+    except Exception as err:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="이미지 파일을 처리할 수 없습니다.",
+        ) from err
+    # 4. S3 업로드 (profile 폴더에 "사번.jpg"로 저장)
+    url = await upload_bytes_to_s3(
+        processed_bytes,
+        "profile",
+        employee["employee_id"],
+        "jpg",
+        "image/jpeg",
+    )
+    # 5. Service <= Repository (MongoDB에 url 반영)
+    await employee_repository.update_employee(
+        db,
+        _id,
+        {
+            "profile_image_url": url,
+            "updated_at": datetime.now(timezone.utc),
+        },
+    )
+    # 6. Service => Router
+    return EmployeeProfileImageRes(profile_image_url=url)

@@ -118,6 +118,11 @@ class EmployeeUpdateRes(BaseModel):
     acknowledged: bool  # 쓰기 작업이 정상적으로 반영되었는지 여부
 
 
+# 임직원(Employee) 프로필 사진 업로드(U) API - 응답(Res)
+class EmployeeProfileImageRes(BaseModel):
+    profile_image_url: str  # S3에 업로드된 프로필 사진 url
+
+
 # 임직원(Employee) 목록 조회(R-L) API - 응답(Res)
 class EmployeeReadListRes(BaseModel):
     id: str = Field(..., alias="_id")  # MongoDB id

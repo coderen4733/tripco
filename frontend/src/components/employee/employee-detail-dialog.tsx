@@ -40,6 +40,8 @@ import {
 import { Skeleton } from '@/components/ui/skeleton'
 import { apiFetch, ApiError } from '@/lib/api'
 import { resolveLabel } from '@/lib/master-maps'
+import { uploadEmployeeProfileImage } from '@/lib/employee-profile-image'
+import { ProfileAvatarUpload } from '@/components/employee/profile-avatar-upload'
 import {
   ADMIN_ROLE_OPTIONS,
   DRIVER_LICENSE_OPTIONS,
@@ -90,6 +92,11 @@ export function EmployeeDetailDialog({
   const [detail, setDetail] = useState<EmployeeDetail | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
+  const [isUploadingProfileImage, setIsUploadingProfileImage] =
+    useState(false)
+  const [profileImageError, setProfileImageError] = useState<string | null>(
+    null,
+  )
 
   // 상세 정보를 (다시) 받아옵니다. 최초 진입 시, 그리고 항목을 저장한 직후에 씁니다.
   const loadDetail = useCallback(async () => {
@@ -155,6 +162,27 @@ export function EmployeeDetailDialog({
     [saveFields],
   )
 
+  // 프로필 사진 크롭이 끝나면 호출됩니다. 여기서는 임직원이 이미 존재하므로
+  // (사원 추가 폼과 달리) 크롭이 끝나는 즉시 바로 업로드합니다.
+  const handleProfileImageCropped = async (blob: Blob) => {
+    if (!employeeId) return
+    setIsUploadingProfileImage(true)
+    setProfileImageError(null)
+    try {
+      await uploadEmployeeProfileImage(employeeId, blob)
+      await loadDetail()
+      onUpdated()
+    } catch (err) {
+      setProfileImageError(
+        err instanceof ApiError
+          ? err.message
+          : '프로필 사진 업로드 중 알 수 없는 오류가 발생했습니다.',
+      )
+    } finally {
+      setIsUploadingProfileImage(false)
+    }
+  }
+
   return (
     <Dialog
       open={employeeId !== null}
@@ -184,6 +212,27 @@ export function EmployeeDetailDialog({
         {!isLoading && detail && masterMaps && (
           <div className="flex flex-col gap-6">
             <FormSection title="계정 정보">
+              <div className="sm:col-span-2">
+                <ProfileAvatarUpload
+                  name={detail.name_kor}
+                  // 프로필 사진은 항상 "사번.jpg"로 저장되어 사진을 바꿔도
+                  // url 자체는 그대로라, 캐시 버스팅 쿼리를 안 붙이면 브라우저가
+                  // 예전 사진을 계속 보여줄 수 있습니다. updated_at은 사진을
+                  // 바꿀 때마다 갱신되므로 이 값을 붙여서 새로 받아오게 합니다.
+                  imageUrl={
+                    detail.profile_image_url
+                      ? `${detail.profile_image_url}?v=${encodeURIComponent(detail.updated_at)}`
+                      : null
+                  }
+                  isUploading={isUploadingProfileImage}
+                  onCropped={handleProfileImageCropped}
+                />
+                {profileImageError && (
+                  <p className="mt-1.5 text-xs text-destructive">
+                    {profileImageError}
+                  </p>
+                )}
+              </div>
               <EditableTextField
                 label="아이디"
                 field="login_id"
@@ -627,6 +676,7 @@ function EditableTextField({
   value,
   type = 'text',
   nullable = false,
+  autoComplete = 'off',
   onSave,
 }: {
   label: string
@@ -634,6 +684,7 @@ function EditableTextField({
   value: string | null
   type?: string
   nullable?: boolean
+  autoComplete?: string
   onSave: SaveFn
 }) {
   const [isEditing, setIsEditing] = useState(false)
@@ -681,6 +732,7 @@ function EditableTextField({
         onChange={(e) => setDraft(e.target.value)}
         className="h-8"
         autoFocus
+        autoComplete={autoComplete}
       />
     </EditableFieldShell>
   )

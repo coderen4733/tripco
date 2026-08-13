@@ -44,6 +44,21 @@ function extractErrorMessage(body: unknown, status: number): string {
   return `요청에 실패했습니다. (${status})`
 }
 
+// fetch 응답을 공통으로 해석합니다. (JSON 파싱 + 성공/실패 처리)
+// apiFetch와 apiUpload가 이 로직을 함께 씁니다.
+async function parseResponse<T>(response: Response): Promise<T> {
+  // 응답 본문은 성공/실패 모두 JSON이므로 항상 파싱을 시도합니다.
+  const body: unknown = await response.json().catch(() => null)
+
+  if (!response.ok) {
+    throw new ApiError(extractErrorMessage(body, response.status))
+  }
+  if (body === null) {
+    throw new ApiError('서버 응답을 해석할 수 없습니다.')
+  }
+  return (body as ApiResponse<T>).data
+}
+
 // path: "/employees/" 처럼 API_BASE_URL 뒤에 붙일 경로
 export async function apiFetch<T>(
   path: string,
@@ -61,15 +76,26 @@ export async function apiFetch<T>(
       '서버에 연결할 수 없습니다. 백엔드 서버가 실행 중인지 확인해 주세요.',
     )
   }
+  return parseResponse<T>(response)
+}
 
-  // 응답 본문은 성공/실패 모두 JSON이므로 항상 파싱을 시도합니다.
-  const body: unknown = await response.json().catch(() => null)
-
-  if (!response.ok) {
-    throw new ApiError(extractErrorMessage(body, response.status))
+// 파일 업로드 전용 함수입니다. (예: 프로필 사진, 추후 입사문서/결재 파일 등)
+// FormData를 보낼 때는 Content-Type을 직접 지정하면 안 됩니다 - 브라우저가
+// 파일 경계값(boundary)까지 포함해서 알아서 multipart/form-data 헤더를 붙여줍니다.
+export async function apiUpload<T>(
+  path: string,
+  formData: FormData,
+): Promise<T> {
+  let response: Response
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      method: 'POST',
+      body: formData,
+    })
+  } catch {
+    throw new ApiError(
+      '서버에 연결할 수 없습니다. 백엔드 서버가 실행 중인지 확인해 주세요.',
+    )
   }
-  if (body === null) {
-    throw new ApiError('서버 응답을 해석할 수 없습니다.')
-  }
-  return (body as ApiResponse<T>).data
+  return parseResponse<T>(response)
 }

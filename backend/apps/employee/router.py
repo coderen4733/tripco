@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, File, UploadFile, status
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from apps.employee import service as employee_service
 from apps.employee.models.schemas import (
     EmployeeCreateReq,
     EmployeeCreateRes,
+    EmployeeProfileImageRes,
     EmployeeReadDetailRes,
     EmployeeReadListRes,
     EmployeeUpdateReq,
@@ -77,3 +78,21 @@ async def update_employee(
     data = await employee_service.update_employee(db, _id, payload)
     # 2. Router => FrontEnd
     return {"message": "임직원 수정에 성공했습니다.", "data": data}
+
+
+# 임직원(Employee) 프로필 사진 업로드(U) API
+# 반드시 임직원이 먼저 생성되어 있어야 하므로(사번 conflict 확인 완료 후),
+# 사원 추가 화면에서는 POST / 로 임직원을 만든 다음 이 API를 따로 호출한다.
+@employee_router.post(
+    "/{_id}/profile-image",
+    response_model=ResponseSchema[EmployeeProfileImageRes],
+)
+async def upload_employee_profile_image(
+    _id: str,
+    file: UploadFile = File(...),
+    db: AsyncIOMotorDatabase = Depends(get_database),
+) -> dict:
+    # 1. Router <= Service
+    data = await employee_service.upload_profile_image(db, _id, file)
+    # 2. Router => FrontEnd
+    return {"message": "프로필 사진 업로드에 성공했습니다.", "data": data}

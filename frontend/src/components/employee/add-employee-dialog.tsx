@@ -27,12 +27,14 @@ import {
 } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
 import { apiFetch, ApiError } from '@/lib/api'
+import { uploadEmployeeProfileImage } from '@/lib/employee-profile-image'
 import type { EmployeeCreatePayload, MasterMaps } from '@/types/employee'
 import {
   DRIVER_LICENSE_OPTIONS,
   GENDER_OPTIONS,
   UNASSIGNED_VALUE,
 } from '@/config/employee-options'
+import { ProfileAvatarUpload } from '@/components/employee/profile-avatar-upload'
 
 interface LanguageRow {
   language: string
@@ -194,12 +196,27 @@ export function AddEmployeeDialog({
   const [form, setForm] = useState<FormState>(createInitialFormState)
   const [error, setError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  // 크롭까지 마친 프로필 사진(아직 업로드 전). 임직원이 실제로 만들어진
+  // 뒤에야 S3로 올리므로, 그 전까지는 화면 미리보기용으로만 들고 있습니다.
+  const [profileImageBlob, setProfileImageBlob] = useState<Blob | null>(null)
+  const [profileImagePreviewUrl, setProfileImagePreviewUrl] = useState<
+    string | null
+  >(null)
 
   const updateField = <K extends keyof FormState>(
     key: K,
     value: FormState[K],
   ) => {
     setForm((prev) => ({ ...prev, [key]: value }))
+  }
+
+  // 크롭 다이얼로그에서 "적용"을 누르면 호출됩니다.
+  const handleProfileImageCropped = (blob: Blob) => {
+    setProfileImageBlob(blob)
+    setProfileImagePreviewUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev)
+      return URL.createObjectURL(blob)
+    })
   }
 
   // 비밀번호 확인 칸 아래에 실시간으로 보여줄 안내 문구입니다.
@@ -218,6 +235,9 @@ export function AddEmployeeDialog({
     if (!nextOpen) {
       setForm(createInitialFormState())
       setError(null)
+      if (profileImagePreviewUrl) URL.revokeObjectURL(profileImagePreviewUrl)
+      setProfileImageBlob(null)
+      setProfileImagePreviewUrl(null)
     }
   }
 
@@ -233,10 +253,22 @@ export function AddEmployeeDialog({
     setError(null)
     setIsSubmitting(true)
     try {
-      await apiFetch('/employees/', {
+      // 1. 먼저 MongoDB에 임직원을 생성한다 (사번/아이디 중복 여부가 여기서 확정됨)
+      const created = await apiFetch<{ _id: string }>('/employees/', {
         method: 'POST',
         body: JSON.stringify(buildPayload(form)),
       })
+      // 2. 생성이 성공했을 때만, 그 뒤에 프로필 사진을 S3로 올린다.
+      // (사번 conflict가 없다는 게 이미 확인된 뒤이므로 이 순서를 지킨다)
+      if (profileImageBlob) {
+        try {
+          await uploadEmployeeProfileImage(created._id, profileImageBlob)
+        } catch (uploadErr) {
+          // 임직원 등록 자체는 이미 성공했으므로 실패로 처리하지 않고,
+          // 상세 정보에서 다시 등록할 수 있다는 것만 콘솔에 남겨둔다.
+          console.error('프로필 사진 업로드 실패:', uploadErr)
+        }
+      }
       onCreated()
       handleOpenChange(false)
     } catch (err) {
@@ -265,7 +297,11 @@ export function AddEmployeeDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="flex flex-col gap-6">
+        <form
+          onSubmit={handleSubmit}
+          autoComplete="off"
+          className="flex flex-col gap-6"
+        >
           {error && (
             <div className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
               <AlertCircle className="h-4 w-4 shrink-0" />
@@ -274,6 +310,13 @@ export function AddEmployeeDialog({
           )}
 
           <FormSection title="계정 정보">
+            <div className="sm:col-span-2">
+              <ProfileAvatarUpload
+                name={form.name_kor}
+                imageUrl={profileImagePreviewUrl}
+                onCropped={handleProfileImageCropped}
+              />
+            </div>
             <TextField
               id="login_id"
               label="아이디"
@@ -282,6 +325,7 @@ export function AddEmployeeDialog({
               onChange={(v) => updateField('login_id', v)}
               placeholder="영문/숫자 3자 이상"
               className="sm:col-span-2"
+              autoComplete="off"
             />
             <TextField
               id="password"
@@ -291,6 +335,7 @@ export function AddEmployeeDialog({
               value={form.password}
               onChange={(v) => updateField('password', v)}
               placeholder="8자 이상"
+              autoComplete="new-password"
             />
             <TextField
               id="password_confirm"
@@ -301,6 +346,7 @@ export function AddEmployeeDialog({
               onChange={(v) => updateField('password_confirm', v)}
               placeholder="비밀번호를 한 번 더 입력하세요"
               error={passwordConfirmError}
+              autoComplete="new-password"
             />
           </FormSection>
 
@@ -566,6 +612,7 @@ function TextField({
   placeholder,
   className,
   error,
+  autoComplete,
 }: {
   id: string
   label: string
@@ -576,6 +623,7 @@ function TextField({
   placeholder?: string
   className?: string
   error?: string | null
+  autoComplete?: string
 }) {
   return (
     <div className={cn('flex flex-col gap-1.5', className)}>
@@ -588,6 +636,7 @@ function TextField({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
+        autoComplete={autoComplete}
       />
       {error && <p className="text-xs text-destructive">{error}</p>}
     </div>
