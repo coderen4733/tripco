@@ -97,6 +97,7 @@ export interface EmployeeDetail {
   created_at: string
   updated_at: string
   deleted_at: string | null
+  last_sign_in_at: string | null
   driver_license_type: string
   owned_vehicle: string | null
   owned_vehicle_number: string | null

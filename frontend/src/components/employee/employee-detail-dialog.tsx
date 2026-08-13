@@ -454,6 +454,10 @@ export function EmployeeDetailDialog({
                 label="퇴사일"
                 value={formatDateTime(detail.deleted_at)}
               />
+              <ReadOnlyField
+                label="최근 접속일"
+                value={formatDateTime(detail.last_sign_in_at)}
+              />
             </FormSection>
 
             <Separator />

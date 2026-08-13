@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 
+from apps.auth.router import auth_router
 from apps.employee.router import employee_router
 from apps.organization.department.router import dept_router
 from apps.organization.duty.router import duty_router
@@ -58,3 +59,6 @@ api_router.include_router(
 api_router.include_router(
     employee_router, prefix="/employees", tags=["Employee 임직원"]
 )
+
+# 3. 인증/인가(Auth)
+api_router.include_router(auth_router, prefix="/auth", tags=["Auth 인증/인가"])

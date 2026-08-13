@@ -127,3 +127,15 @@ async def update_employee(
             status_code=status.HTTP_409_CONFLICT,
             detail="중복된 login_id입니다.",
         )
+
+
+# 마지막 로그인 일시 기록(last_sign_in_time)
+async def last_sign_in_time(
+    db: AsyncIOMotorDatabase, _id: str, sign_in_time: any
+) -> None:
+    await db[COLLECTION_NAME].update_one(
+        {"_id": ObjectId(_id)},
+        {
+            "$set": {"last_sign_in_at": sign_in_time},
+        },
+    )

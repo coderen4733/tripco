@@ -52,6 +52,7 @@ class EmployeeEntity(BaseModel):
         default_factory=lambda: datetime.now(timezone.utc)
     )  # 수정일
     deleted_at: datetime | None = None  # 퇴사일
+    last_sign_in_at: datetime | None = None  # 최근 접속일
 
     # 3. 보유능력
     driver_license_type: DriverLicenseType = (
