@@ -12,10 +12,16 @@ from apps.organization.title.models.schemas import (
     TitleDeleteRes,
     TitleReadDetailRes,
     TitleReadListRes,
+    TitleReorderReq,
+    TitleReorderRes,
+    TitleStatusReq,
+    TitleStatusRes,
     TitleUpdateReq,
     TitleUpdateRes,
 )
 from common.lexorank import LexoRank
+from common.reassign import count_references, reassign_references
+from common.reorder import compute_reordered_value
 
 
 # 직책(Title) 생성(C) API
@@ -194,12 +200,50 @@ async def update_title(
     return data
 
 
+# 이 직책을 쓰고 있는 컬렉션/필드 목록.
+TITLE_REFERENCES = [
+    ("employees", "title_id"),
+]
+
+
 # 직책(Title) 삭제(D) API
+# reassign_to: 이 직책을 쓰던 임직원을 대신 옮겨 담을 다른 직책 _id.
 async def delete_title(
     db: AsyncIOMotorDatabase,
     redis: Redis,
     _id: str,
+    reassign_to: str | None = None,
 ) -> TitleDeleteRes:
+    # 0. 참조 무결성 체크: 이 직책을 쓰는 임직원이 있으면, 다른 직책으로
+    #    먼저 옮긴 뒤에만 삭제할 수 있다.
+    affected_count = await count_references(db, TITLE_REFERENCES, _id)
+    if affected_count > 0:
+        if reassign_to is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "message": (
+                        "이 직책을 사용 중인 임직원이 있습니다. "
+                        "재배치할 직책을 선택해 주세요."
+                    ),
+                    "requires_reassignment": True,
+                    "affected_count": affected_count,
+                },
+            )
+        if reassign_to == _id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="삭제할 직책과 다른 직책을 선택해 주세요.",
+            )
+        reassign_target = await title_repository.get_title_by_id(
+            db, reassign_to
+        )
+        if not reassign_target:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="재배치 대상 직책을 찾을 수 없습니다.",
+            )
+        await reassign_references(db, TITLE_REFERENCES, _id, reassign_to)
     # 1. Service <= Repository
     deleted_title = await title_repository.delete_title(
         db,
@@ -227,5 +271,68 @@ async def delete_title(
     data = TitleDeleteRes(
         deleted_count=deleted_title.deleted_count,
         acknowledged=deleted_title.acknowledged,
+    )
+    return data
+
+
+# 직책(Title) 순서 변경(U) API
+async def reorder_title(
+    db: AsyncIOMotorDatabase,
+    _id: str,
+    payload: TitleReorderReq,
+) -> TitleReorderRes:
+    # 1. LexoRank => 새 order 계산
+    new_order = await compute_reordered_value(
+        db,
+        title_repository.COLLECTION_NAME,
+        payload.prev_id,
+        payload.next_id,
+    )
+    # 2. Service <= Repository
+    updated_title = await title_repository.update_title(
+        db,
+        _id,
+        {
+            "order": new_order,
+            "updated_at": datetime.now(timezone.utc),
+        },
+    )
+    # 2-1. Existing Check(404)
+    if updated_title.matched_count == 0:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="순서를 변경할 직책이 존재하지 않습니다.",
+        )
+    # 3. Service => Router
+    data = TitleReorderRes(order=new_order)
+    return data
+
+
+# 직책(Title) 활성/비활성 상태 변경(U) API
+async def update_title_status(
+    db: AsyncIOMotorDatabase,
+    _id: str,
+    payload: TitleStatusReq,
+) -> TitleStatusRes:
+    # 1. Service <= Repository
+    updated_title = await title_repository.update_title(
+        db,
+        _id,
+        {
+            "status": payload.status,
+            "updated_at": datetime.now(timezone.utc),
+        },
+    )
+    # 1-1. Existing Check(404)
+    if updated_title.matched_count == 0:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="상태를 변경할 직책이 존재하지 않습니다.",
+        )
+    # 2. Service => Router
+    data = TitleStatusRes(
+        matched_count=updated_title.matched_count,
+        modified_count=updated_title.modified_count,
+        acknowledged=updated_title.acknowledged,
     )
     return data

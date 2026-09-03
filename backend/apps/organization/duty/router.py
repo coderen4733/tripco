@@ -2,6 +2,10 @@ from fastapi import APIRouter, Depends, status
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from redis.asyncio import Redis
 
+from apps.auth.dependencies import (
+    get_current_employee,
+    require_employee_manage_role,
+)
 from apps.organization.duty import service as duty_service
 from apps.organization.duty.models.schemas import (
     DutyCreateReq,
@@ -9,6 +13,10 @@ from apps.organization.duty.models.schemas import (
     DutyDeleteRes,
     DutyReadDetailRes,
     DutyReadListRes,
+    DutyReorderReq,
+    DutyReorderRes,
+    DutyStatusReq,
+    DutyStatusRes,
     DutyUpdateReq,
     DutyUpdateRes,
 )
@@ -29,7 +37,9 @@ async def create_duty(
     payload: DutyCreateReq,
     db: AsyncIOMotorDatabase = Depends(get_database),
     redis: Redis = Depends(get_redis),
+    current_employee: dict = Depends(get_current_employee),
 ) -> dict:
+    require_employee_manage_role(current_employee)
     # 1. Router <= Service
     data = await duty_service.create_duty(
         db,
@@ -98,7 +108,9 @@ async def update_duty(
     payload: DutyUpdateReq,
     db: AsyncIOMotorDatabase = Depends(get_database),
     redis: Redis = Depends(get_redis),
+    current_employee: dict = Depends(get_current_employee),
 ) -> dict:
+    require_employee_manage_role(current_employee)
     # 1. Router <= Service
     data = await duty_service.update_duty(
         db,
@@ -113,6 +125,56 @@ async def update_duty(
     }
 
 
+# 직무(Duty) 순서 변경(U) API
+@duty_router.patch(
+    "/{_id}/order",
+    response_model=ResponseSchema[DutyReorderRes],
+)
+async def reorder_duty(
+    _id: str,
+    payload: DutyReorderReq,
+    db: AsyncIOMotorDatabase = Depends(get_database),
+    current_employee: dict = Depends(get_current_employee),
+) -> dict:
+    require_employee_manage_role(current_employee)
+    # 1. Router <= Service
+    data = await duty_service.reorder_duty(
+        db,
+        _id,
+        payload,
+    )
+    # 2. Router => FrontEnd
+    return {
+        "message": "직무 순서 변경에 성공했습니다.",
+        "data": data,
+    }
+
+
+# 직무(Duty) 활성/비활성 상태 변경(U) API
+@duty_router.patch(
+    "/{_id}/status",
+    response_model=ResponseSchema[DutyStatusRes],
+)
+async def update_duty_status(
+    _id: str,
+    payload: DutyStatusReq,
+    db: AsyncIOMotorDatabase = Depends(get_database),
+    current_employee: dict = Depends(get_current_employee),
+) -> dict:
+    require_employee_manage_role(current_employee)
+    # 1. Router <= Service
+    data = await duty_service.update_duty_status(
+        db,
+        _id,
+        payload,
+    )
+    # 2. Router => FrontEnd
+    return {
+        "message": "직무 활성/비활성 상태 변경에 성공했습니다.",
+        "data": data,
+    }
+
+
 # 직무(Duty) 삭제(D) API
 @duty_router.delete(
     "/{_id}",
@@ -121,14 +183,18 @@ async def update_duty(
 )
 async def delete_duty(
     _id: str,
+    reassign_to: str | None = None,
     db: AsyncIOMotorDatabase = Depends(get_database),
     redis: Redis = Depends(get_redis),
+    current_employee: dict = Depends(get_current_employee),
 ) -> dict:
+    require_employee_manage_role(current_employee)
     # 1. Router <= Service
     data = await duty_service.delete_duty(
         db,
         redis,
         _id,
+        reassign_to,
     )
     # 2. Router => FrontEnd
     return {

@@ -2,6 +2,10 @@ from fastapi import APIRouter, Depends, status
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from redis.asyncio import Redis
 
+from apps.auth.dependencies import (
+    get_current_employee,
+    require_employee_manage_role,
+)
 from apps.organization.title import service as title_service
 from apps.organization.title.models.schemas import (
     TitleCreateReq,
@@ -9,6 +13,10 @@ from apps.organization.title.models.schemas import (
     TitleDeleteRes,
     TitleReadDetailRes,
     TitleReadListRes,
+    TitleReorderReq,
+    TitleReorderRes,
+    TitleStatusReq,
+    TitleStatusRes,
     TitleUpdateReq,
     TitleUpdateRes,
 )
@@ -29,7 +37,9 @@ async def create_title(
     payload: TitleCreateReq,
     db: AsyncIOMotorDatabase = Depends(get_database),
     redis: Redis = Depends(get_redis),
+    current_employee: dict = Depends(get_current_employee),
 ) -> dict:
+    require_employee_manage_role(current_employee)
     # 1. Router <= Service
     data = await title_service.create_title(
         db,
@@ -98,7 +108,9 @@ async def update_title(
     payload: TitleUpdateReq,
     db: AsyncIOMotorDatabase = Depends(get_database),
     redis: Redis = Depends(get_redis),
+    current_employee: dict = Depends(get_current_employee),
 ) -> dict:
+    require_employee_manage_role(current_employee)
     # 1. Router <= Service
     data = await title_service.update_title(
         db,
@@ -113,6 +125,56 @@ async def update_title(
     }
 
 
+# 직책(Title) 순서 변경(U) API
+@title_router.patch(
+    "/{_id}/order",
+    response_model=ResponseSchema[TitleReorderRes],
+)
+async def reorder_title(
+    _id: str,
+    payload: TitleReorderReq,
+    db: AsyncIOMotorDatabase = Depends(get_database),
+    current_employee: dict = Depends(get_current_employee),
+) -> dict:
+    require_employee_manage_role(current_employee)
+    # 1. Router <= Service
+    data = await title_service.reorder_title(
+        db,
+        _id,
+        payload,
+    )
+    # 2. Router => FrontEnd
+    return {
+        "message": "직책 순서 변경에 성공했습니다.",
+        "data": data,
+    }
+
+
+# 직책(Title) 활성/비활성 상태 변경(U) API
+@title_router.patch(
+    "/{_id}/status",
+    response_model=ResponseSchema[TitleStatusRes],
+)
+async def update_title_status(
+    _id: str,
+    payload: TitleStatusReq,
+    db: AsyncIOMotorDatabase = Depends(get_database),
+    current_employee: dict = Depends(get_current_employee),
+) -> dict:
+    require_employee_manage_role(current_employee)
+    # 1. Router <= Service
+    data = await title_service.update_title_status(
+        db,
+        _id,
+        payload,
+    )
+    # 2. Router => FrontEnd
+    return {
+        "message": "직책 활성/비활성 상태 변경에 성공했습니다.",
+        "data": data,
+    }
+
+
 # 직책(Title) 삭제(D) API
 @title_router.delete(
     "/{_id}",
@@ -121,14 +183,18 @@ async def update_title(
 )
 async def delete_title(
     _id: str,
+    reassign_to: str | None = None,
     db: AsyncIOMotorDatabase = Depends(get_database),
     redis: Redis = Depends(get_redis),
+    current_employee: dict = Depends(get_current_employee),
 ) -> dict:
+    require_employee_manage_role(current_employee)
     # 1. Router <= Service
     data = await title_service.delete_title(
         db,
         redis,
         _id,
+        reassign_to,
     )
     # 2. Router => FrontEnd
     return {

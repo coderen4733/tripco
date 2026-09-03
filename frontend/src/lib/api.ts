@@ -17,18 +17,33 @@ interface ApiResponse<T> {
 
 // FastAPI가 자체적으로 만들어내는 에러 응답 형태 (HTTPException, Pydantic 검증 실패 등)
 // 이 경우엔 message가 아니라 detail 필드에 에러 내용이 담겨서 온다.
+// detail은 보통 문자열이지만(예: "...할 수 없습니다."), 조직 관리의 삭제
+// API처럼 화면에서 추가 판단이 필요한 경우엔 객체로도 내려온다
+// (예: {message, requires_reassignment, affected_count}).
 interface FastApiErrorBody {
-  detail?: string | { msg: string }[]
+  detail?: string | { msg: string }[] | Record<string, unknown>
 }
 
 // API 요청이 실패했을 때 던지는 에러
 // 화면에서 error.message를 그대로 보여줄 수 있도록 백엔드 메시지를 담습니다.
-export class ApiError extends Error {}
+// status/detail도 함께 담아두어, 단순 메시지 표시를 넘어 상황별로 다른
+// 처리가 필요한 곳(예: 삭제 전 재배치가 필요한지 판단)에서 쓸 수 있게 합니다.
+export class ApiError extends Error {
+  status: number
+  detail: unknown
+
+  constructor(message: string, status = 0, detail: unknown = undefined) {
+    super(message)
+    this.status = status
+    this.detail = detail
+  }
+}
 
 // 실패 응답 본문에서 사람이 읽을 수 있는 에러 메시지를 뽑아냅니다.
 // 1) 우리 쪽 ResponseSchema의 message
 // 2) FastAPI HTTPException의 detail(문자열)
 // 3) Pydantic 검증 실패의 detail(배열) -> 메시지들을 이어붙임
+// 4) detail이 객체인 경우(구조화된 에러) -> 그 안의 message
 function extractErrorMessage(body: unknown, status: number): string {
   if (body && typeof body === 'object') {
     const asResponse = body as Partial<ApiResponse<unknown>>
@@ -42,6 +57,14 @@ function extractErrorMessage(body: unknown, status: number): string {
     if (Array.isArray(asFastApiError.detail)) {
       return asFastApiError.detail.map((err) => err.msg).join(', ')
     }
+    if (
+      asFastApiError.detail &&
+      typeof asFastApiError.detail === 'object' &&
+      typeof (asFastApiError.detail as { message?: unknown }).message ===
+        'string'
+    ) {
+      return (asFastApiError.detail as { message: string }).message
+    }
   }
   return `요청에 실패했습니다. (${status})`
 }
@@ -53,10 +76,18 @@ async function parseResponse<T>(response: Response): Promise<T> {
   const body: unknown = await response.json().catch(() => null)
 
   if (!response.ok) {
-    throw new ApiError(extractErrorMessage(body, response.status))
+    const detail =
+      body && typeof body === 'object'
+        ? (body as FastApiErrorBody).detail
+        : undefined
+    throw new ApiError(
+      extractErrorMessage(body, response.status),
+      response.status,
+      detail,
+    )
   }
   if (body === null) {
-    throw new ApiError('서버 응답을 해석할 수 없습니다.')
+    throw new ApiError('서버 응답을 해석할 수 없습니다.', response.status)
   }
   return (body as ApiResponse<T>).data
 }

@@ -58,3 +58,26 @@ class EmpTypeUpdateRes(BaseModel):
 class EmpTypeDeleteRes(BaseModel):
     deleted_count: int  # 실제 삭제된 문서 개수 (최대 1)
     acknowledged: bool  # 삭제 요청을 정상적으로 접수했는지 여부
+
+
+# 고용형태(EmploymentType) 순서 변경(U) API - 요청(Req)
+class EmpTypeReorderReq(BaseModel):
+    prev_id: str | None = Field(default=None)
+    next_id: str | None = Field(default=None)
+
+
+# 고용형태(EmploymentType) 순서 변경(U) API - 응답(Res)
+class EmpTypeReorderRes(BaseModel):
+    order: str  # 새로 계산된 order 값
+
+
+# 고용형태(EmploymentType) 활성/비활성 상태 변경(U) API - 요청(Req)
+class EmpTypeStatusReq(BaseModel):
+    status: bool  # true=활성, false=비활성(회색 처리)
+
+
+# 고용형태(EmploymentType) 활성/비활성 상태 변경(U) API - 응답(Res)
+class EmpTypeStatusRes(BaseModel):
+    matched_count: int  # 쿼리 조건에 매칭된 문서 개수 (최대 1)
+    modified_count: int  # 실제 데이터가 변경된 문서 개수 (최대 1)
+    acknowledged: bool  # 쓰기 작업이 정상적으로 반영되었는지 여부

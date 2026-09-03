@@ -2,6 +2,10 @@ from fastapi import APIRouter, Depends, status
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from redis.asyncio import Redis
 
+from apps.auth.dependencies import (
+    get_current_employee,
+    require_employee_manage_role,
+)
 from apps.organization.position import service as position_service
 from apps.organization.position.models.schemas import (
     PositionCreateReq,
@@ -9,6 +13,10 @@ from apps.organization.position.models.schemas import (
     PositionDeleteRes,
     PositionReadDetailRes,
     PositionReadListRes,
+    PositionReorderReq,
+    PositionReorderRes,
+    PositionStatusReq,
+    PositionStatusRes,
     PositionUpdateReq,
     PositionUpdateRes,
 )
@@ -29,7 +37,9 @@ async def create_position(
     payload: PositionCreateReq,
     db: AsyncIOMotorDatabase = Depends(get_database),
     redis: Redis = Depends(get_redis),
+    current_employee: dict = Depends(get_current_employee),
 ) -> dict:
+    require_employee_manage_role(current_employee)
     # 1. Router <= Service
     data = await position_service.create_position(
         db,
@@ -98,7 +108,9 @@ async def update_position(
     payload: PositionUpdateReq,
     db: AsyncIOMotorDatabase = Depends(get_database),
     redis: Redis = Depends(get_redis),
+    current_employee: dict = Depends(get_current_employee),
 ) -> dict:
+    require_employee_manage_role(current_employee)
     # 1. Router <= Service
     data = await position_service.update_position(
         db,
@@ -113,6 +125,56 @@ async def update_position(
     }
 
 
+# 직급/직위(Position) 순서 변경(U) API
+@position_router.patch(
+    "/{_id}/order",
+    response_model=ResponseSchema[PositionReorderRes],
+)
+async def reorder_position(
+    _id: str,
+    payload: PositionReorderReq,
+    db: AsyncIOMotorDatabase = Depends(get_database),
+    current_employee: dict = Depends(get_current_employee),
+) -> dict:
+    require_employee_manage_role(current_employee)
+    # 1. Router <= Service
+    data = await position_service.reorder_position(
+        db,
+        _id,
+        payload,
+    )
+    # 2. Router => FrontEnd
+    return {
+        "message": "직급/직위 순서 변경에 성공했습니다.",
+        "data": data,
+    }
+
+
+# 직급/직위(Position) 활성/비활성 상태 변경(U) API
+@position_router.patch(
+    "/{_id}/status",
+    response_model=ResponseSchema[PositionStatusRes],
+)
+async def update_position_status(
+    _id: str,
+    payload: PositionStatusReq,
+    db: AsyncIOMotorDatabase = Depends(get_database),
+    current_employee: dict = Depends(get_current_employee),
+) -> dict:
+    require_employee_manage_role(current_employee)
+    # 1. Router <= Service
+    data = await position_service.update_position_status(
+        db,
+        _id,
+        payload,
+    )
+    # 2. Router => FrontEnd
+    return {
+        "message": "직급/직위 활성/비활성 상태 변경에 성공했습니다.",
+        "data": data,
+    }
+
+
 # 직급/직위(Position) 삭제(D) API
 @position_router.delete(
     "/{_id}",
@@ -121,14 +183,18 @@ async def update_position(
 )
 async def delete_position(
     _id: str,
+    reassign_to: str | None = None,
     db: AsyncIOMotorDatabase = Depends(get_database),
     redis: Redis = Depends(get_redis),
+    current_employee: dict = Depends(get_current_employee),
 ) -> dict:
+    require_employee_manage_role(current_employee)
     # 1. Router <= Service
     data = await position_service.delete_position(
         db,
         redis,
         _id,
+        reassign_to,
     )
     # 2. Router => FrontEnd
     return {

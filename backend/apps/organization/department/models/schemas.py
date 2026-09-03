@@ -27,6 +27,7 @@ class DeptReadListRes(BaseModel):
     dept_code: str  # ERP 부서code
     name: str  # 부서명
     leader_id: str | None  # 부서장 임직원id
+    hq_id: str | None  # 상위 본부id (아직 본부 마스터컬렉션이 없어 항상 None)
     status: bool  # 현재 사용 여부
     order: str  # 배열 순서
 
@@ -62,3 +63,29 @@ class DeptUpdateRes(BaseModel):
 class DeptDeleteRes(BaseModel):
     deleted_count: int  # 실제 삭제된 문서 개수 (최대 1)
     acknowledged: bool  # 삭제 요청을 정상적으로 접수했는지 여부
+
+
+# 부서(Department) 순서 변경(U) API - 요청(Req)
+# 드래그 앤 드롭으로 옮겨놓은 위치의 바로 앞/뒤 부서 _id를 보내면,
+# 서버가 그 두 부서의 order 사이 값을 계산해서 넣어준다.
+# (맨 앞으로 옮기면 prev_id가 없고, 맨 뒤로 옮기면 next_id가 없다)
+class DeptReorderReq(BaseModel):
+    prev_id: str | None = Field(default=None)
+    next_id: str | None = Field(default=None)
+
+
+# 부서(Department) 순서 변경(U) API - 응답(Res)
+class DeptReorderRes(BaseModel):
+    order: str  # 새로 계산된 order 값
+
+
+# 부서(Department) 활성/비활성 상태 변경(U) API - 요청(Req)
+class DeptStatusReq(BaseModel):
+    status: bool  # true=활성, false=비활성(회색 처리)
+
+
+# 부서(Department) 활성/비활성 상태 변경(U) API - 응답(Res)
+class DeptStatusRes(BaseModel):
+    matched_count: int  # 쿼리 조건에 매칭된 문서 개수 (최대 1)
+    modified_count: int  # 실제 데이터가 변경된 문서 개수 (최대 1)
+    acknowledged: bool  # 쓰기 작업이 정상적으로 반영되었는지 여부

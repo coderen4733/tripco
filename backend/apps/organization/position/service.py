@@ -12,10 +12,16 @@ from apps.organization.position.models.schemas import (
     PositionDeleteRes,
     PositionReadDetailRes,
     PositionReadListRes,
+    PositionReorderReq,
+    PositionReorderRes,
+    PositionStatusReq,
+    PositionStatusRes,
     PositionUpdateReq,
     PositionUpdateRes,
 )
 from common.lexorank import LexoRank
+from common.reassign import count_references, reassign_references
+from common.reorder import compute_reordered_value
 
 
 # 직급/직위(Positon) 생성(C) API
@@ -198,12 +204,53 @@ async def update_position(
     return data
 
 
+# 이 직급/직위를 쓰고 있는 컬렉션/필드 목록.
+POSITION_REFERENCES = [
+    ("employees", "position_id"),
+]
+
+
 # 직급/직위(Positon) 삭제(D) API
+# reassign_to: 이 직급/직위를 쓰던 임직원을 대신 옮겨 담을 다른
+# 직급/직위 _id.
 async def delete_position(
     db: AsyncIOMotorDatabase,
     redis: Redis,
     _id: str,
+    reassign_to: str | None = None,
 ) -> PositionDeleteRes:
+    # 0. 참조 무결성 체크: 이 직급/직위를 쓰는 임직원이 있으면, 다른
+    #    직급/직위로 먼저 옮긴 뒤에만 삭제할 수 있다.
+    affected_count = await count_references(db, POSITION_REFERENCES, _id)
+    if affected_count > 0:
+        if reassign_to is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "message": (
+                        "이 직급/직위를 사용 중인 임직원이 있습니다. "
+                        "재배치할 직급/직위를 선택해 주세요."
+                    ),
+                    "requires_reassignment": True,
+                    "affected_count": affected_count,
+                },
+            )
+        if reassign_to == _id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="삭제할 직급/직위와 다른 항목을 선택해 주세요.",
+            )
+        reassign_target = await position_repository.get_position_by_id(
+            db, reassign_to
+        )
+        if not reassign_target:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="재배치 대상 직급/직위를 찾을 수 없습니다.",
+            )
+        await reassign_references(
+            db, POSITION_REFERENCES, _id, reassign_to
+        )
     # 1. Service <= Repository
     deleted_position = await position_repository.delete_position(
         db,
@@ -231,5 +278,68 @@ async def delete_position(
     data = PositionDeleteRes(
         deleted_count=deleted_position.deleted_count,
         acknowledged=deleted_position.acknowledged,
+    )
+    return data
+
+
+# 직급/직위(Positon) 순서 변경(U) API
+async def reorder_position(
+    db: AsyncIOMotorDatabase,
+    _id: str,
+    payload: PositionReorderReq,
+) -> PositionReorderRes:
+    # 1. LexoRank => 새 order 계산
+    new_order = await compute_reordered_value(
+        db,
+        position_repository.COLLECTION_NAME,
+        payload.prev_id,
+        payload.next_id,
+    )
+    # 2. Service <= Repository
+    updated_position = await position_repository.update_position(
+        db,
+        _id,
+        {
+            "order": new_order,
+            "updated_at": datetime.now(timezone.utc),
+        },
+    )
+    # 2-1. Existing Check(404)
+    if updated_position.matched_count == 0:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="순서를 변경할 직급/직위가 존재하지 않습니다.",
+        )
+    # 3. Service => Router
+    data = PositionReorderRes(order=new_order)
+    return data
+
+
+# 직급/직위(Positon) 활성/비활성 상태 변경(U) API
+async def update_position_status(
+    db: AsyncIOMotorDatabase,
+    _id: str,
+    payload: PositionStatusReq,
+) -> PositionStatusRes:
+    # 1. Service <= Repository
+    updated_position = await position_repository.update_position(
+        db,
+        _id,
+        {
+            "status": payload.status,
+            "updated_at": datetime.now(timezone.utc),
+        },
+    )
+    # 1-1. Existing Check(404)
+    if updated_position.matched_count == 0:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="상태를 변경할 직급/직위가 존재하지 않습니다.",
+        )
+    # 2. Service => Router
+    data = PositionStatusRes(
+        matched_count=updated_position.matched_count,
+        modified_count=updated_position.modified_count,
+        acknowledged=updated_position.acknowledged,
     )
     return data

@@ -8,6 +8,7 @@ import { AuthProvider } from './contexts/auth-context'
 import { MasterMapsProvider } from './contexts/master-maps-context'
 import { PlaceholderPage } from './pages/placeholder-page'
 import { EmployeeManagementPage } from './pages/employee-management-page'
+import { OrganizationManagementPage } from './pages/organization-management-page'
 import { AlarmManagementPage } from './pages/alarm-management-page'
 import { flattenNavItems } from './config/nav-menu'
 
@@ -17,6 +18,7 @@ import { flattenNavItems } from './config/nav-menu'
 const routableItems = flattenNavItems()
 const pageOverrides: Record<string, ComponentType> = {
   '/company/employees': EmployeeManagementPage,
+  '/company/organization': OrganizationManagementPage,
   '/etc/alarms': AlarmManagementPage,
 }
 

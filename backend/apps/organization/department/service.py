@@ -12,10 +12,16 @@ from apps.organization.department.models.schemas import (
     DeptDeleteRes,
     DeptReadDetailRes,
     DeptReadListRes,
+    DeptReorderReq,
+    DeptReorderRes,
+    DeptStatusReq,
+    DeptStatusRes,
     DeptUpdateReq,
     DeptUpdateRes,
 )
 from common.lexorank import LexoRank
+from common.reassign import count_references, reassign_references
+from common.reorder import compute_reordered_value
 
 
 # 부서(Department) 생성(C) API
@@ -105,6 +111,7 @@ async def get_departments_list(
             dept_code=department["dept_code"],
             name=department["name"],
             leader_id=department["leader_id"],
+            hq_id=department.get("hq_id"),
             status=department["status"],
             order=department["order"],
         )
@@ -197,12 +204,58 @@ async def update_department(
     return data
 
 
+# 이 부서를 상위로 두고 있는 컬렉션/필드 목록. (부서를 지울 때 이 두
+# 곳을 뒤져서 참조 개수를 세거나, 다른 부서로 한꺼번에 옮긴다)
+DEPARTMENT_REFERENCES = [
+    ("mst_teams", "dept_id"),
+    ("employees", "dept_id"),
+]
+
+
 # 부서(Department) 삭제(D) API
+# reassign_to: 이 부서를 참조하던 팀/임직원을 대신 옮겨 담을 다른 부서
+# _id. 참조하는 데이터가 있는데 reassign_to가 없으면 409로 재배치가
+# 필요하다는 사실(및 몇 건인지)을 알려주고, 실제 삭제는 진행하지 않는다.
 async def delete_department(
     db: AsyncIOMotorDatabase,
     redis: Redis,
     _id: str,
+    reassign_to: str | None = None,
 ) -> DeptDeleteRes:
+    # 0. 참조 무결성 체크: 이 부서를 참조하는 팀/임직원이 있으면,
+    #    다른 부서로 먼저 옮긴 뒤에만 삭제할 수 있다. (그냥 지워버리면
+    #    그 팀/임직원의 dept_id가 존재하지 않는 부서를 가리키게 됨)
+    affected_count = await count_references(db, DEPARTMENT_REFERENCES, _id)
+    if affected_count > 0:
+        if reassign_to is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "message": (
+                        "이 부서를 사용 중인 팀/임직원이 있습니다. "
+                        "재배치할 부서를 선택해 주세요."
+                    ),
+                    "requires_reassignment": True,
+                    "affected_count": affected_count,
+                },
+            )
+        if reassign_to == _id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="삭제할 부서와 다른 부서를 선택해 주세요.",
+            )
+        reassign_target = await dept_repository.get_department_by_id(
+            db, reassign_to
+        )
+        if not reassign_target:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="재배치 대상 부서를 찾을 수 없습니다.",
+            )
+        # 0-1. 참조하던 팀/임직원을 전부 재배치 대상 부서로 옮긴 뒤 삭제 진행
+        await reassign_references(
+            db, DEPARTMENT_REFERENCES, _id, reassign_to
+        )
     # 1. Service <= Repository
     deleted_dept = await dept_repository.delete_department(
         db,
@@ -230,5 +283,70 @@ async def delete_department(
     data = DeptDeleteRes(
         deleted_count=deleted_dept.deleted_count,
         acknowledged=deleted_dept.acknowledged,
+    )
+    return data
+
+
+# 부서(Department) 순서 변경(U) API
+# 드래그 앤 드롭으로 옮겨놓은 앞/뒤 부서를 기준으로 새 order 값을
+# 계산해 저장한다.
+async def reorder_department(
+    db: AsyncIOMotorDatabase,
+    _id: str,
+    payload: DeptReorderReq,
+) -> DeptReorderRes:
+    # 1. LexoRank => 새 order 계산
+    new_order = await compute_reordered_value(
+        db,
+        dept_repository.COLLECTION_NAME,
+        payload.prev_id,
+        payload.next_id,
+    )
+    # 2. Service <= Repository
+    updated_dept = await dept_repository.update_department(
+        db,
+        _id,
+        {
+            "order": new_order,
+            "updated_at": datetime.now(timezone.utc),
+        },
+    )
+    # 2-1. Existing Check(404)
+    if updated_dept.matched_count == 0:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="순서를 변경할 부서가 존재하지 않습니다.",
+        )
+    # 3. Service => Router
+    data = DeptReorderRes(order=new_order)
+    return data
+
+
+# 부서(Department) 활성/비활성 상태 변경(U) API
+async def update_department_status(
+    db: AsyncIOMotorDatabase,
+    _id: str,
+    payload: DeptStatusReq,
+) -> DeptStatusRes:
+    # 1. Service <= Repository
+    updated_dept = await dept_repository.update_department(
+        db,
+        _id,
+        {
+            "status": payload.status,
+            "updated_at": datetime.now(timezone.utc),
+        },
+    )
+    # 1-1. Existing Check(404)
+    if updated_dept.matched_count == 0:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="상태를 변경할 부서가 존재하지 않습니다.",
+        )
+    # 2. Service => Router
+    data = DeptStatusRes(
+        matched_count=updated_dept.matched_count,
+        modified_count=updated_dept.modified_count,
+        acknowledged=updated_dept.acknowledged,
     )
     return data

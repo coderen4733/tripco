@@ -2,6 +2,10 @@ from fastapi import APIRouter, Depends, status
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from redis.asyncio import Redis
 
+from apps.auth.dependencies import (
+    get_current_employee,
+    require_employee_manage_role,
+)
 from apps.organization.team import service as team_service
 from apps.organization.team.models.schemas import (
     TeamCreateReq,
@@ -9,6 +13,10 @@ from apps.organization.team.models.schemas import (
     TeamDeleteRes,
     TeamReadDetailRes,
     TeamReadListRes,
+    TeamReorderReq,
+    TeamReorderRes,
+    TeamStatusReq,
+    TeamStatusRes,
     TeamUpdateReq,
     TeamUpdateRes,
 )
@@ -29,7 +37,9 @@ async def create_team(
     payload: TeamCreateReq,
     db: AsyncIOMotorDatabase = Depends(get_database),
     redis: Redis = Depends(get_redis),
+    current_employee: dict = Depends(get_current_employee),
 ) -> dict:
+    require_employee_manage_role(current_employee)
     # 1. Router <= Service
     data = await team_service.create_team(
         db,
@@ -98,7 +108,9 @@ async def update_team(
     payload: TeamUpdateReq,
     db: AsyncIOMotorDatabase = Depends(get_database),
     redis: Redis = Depends(get_redis),
+    current_employee: dict = Depends(get_current_employee),
 ) -> dict:
+    require_employee_manage_role(current_employee)
     # 1. Router <= Service
     data = await team_service.update_team(
         db,
@@ -113,6 +125,56 @@ async def update_team(
     }
 
 
+# 팀(Team) 순서 변경(U) API
+@team_router.patch(
+    "/{_id}/order",
+    response_model=ResponseSchema[TeamReorderRes],
+)
+async def reorder_team(
+    _id: str,
+    payload: TeamReorderReq,
+    db: AsyncIOMotorDatabase = Depends(get_database),
+    current_employee: dict = Depends(get_current_employee),
+) -> dict:
+    require_employee_manage_role(current_employee)
+    # 1. Router <= Service
+    data = await team_service.reorder_team(
+        db,
+        _id,
+        payload,
+    )
+    # 2. Router => FrontEnd
+    return {
+        "message": "팀 순서 변경에 성공했습니다.",
+        "data": data,
+    }
+
+
+# 팀(Team) 활성/비활성 상태 변경(U) API
+@team_router.patch(
+    "/{_id}/status",
+    response_model=ResponseSchema[TeamStatusRes],
+)
+async def update_team_status(
+    _id: str,
+    payload: TeamStatusReq,
+    db: AsyncIOMotorDatabase = Depends(get_database),
+    current_employee: dict = Depends(get_current_employee),
+) -> dict:
+    require_employee_manage_role(current_employee)
+    # 1. Router <= Service
+    data = await team_service.update_team_status(
+        db,
+        _id,
+        payload,
+    )
+    # 2. Router => FrontEnd
+    return {
+        "message": "팀 활성/비활성 상태 변경에 성공했습니다.",
+        "data": data,
+    }
+
+
 # 팀(Team) 삭제(D) API
 @team_router.delete(
     "/{_id}",
@@ -121,14 +183,18 @@ async def update_team(
 )
 async def delete_team(
     _id: str,
+    reassign_to: str | None = None,
     db: AsyncIOMotorDatabase = Depends(get_database),
     redis: Redis = Depends(get_redis),
+    current_employee: dict = Depends(get_current_employee),
 ) -> dict:
+    require_employee_manage_role(current_employee)
     # 1. Router <= Service
     data = await team_service.delete_team(
         db,
         redis,
         _id,
+        reassign_to,
     )
     # 2. Router => FrontEnd
     return {

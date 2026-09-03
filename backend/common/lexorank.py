@@ -42,3 +42,9 @@ class LexoRank:
             if p_idx != n_idx and mid_idx != p_idx:
                 break
         return "".join(result).rstrip("0")
+
+    # 맨 앞으로 이동할 때 쓰는 rank 생성 (다음 rank보다 작은 값)
+    # CHAR_SET의 첫 글자("0")를 하한선으로 두고 get_between을 재사용한다.
+    @classmethod
+    def get_before(cls, next_rank: str) -> str:
+        return cls.get_between(cls.CHAR_SET[0], next_rank)
