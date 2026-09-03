@@ -36,13 +36,24 @@ import {
 import { cn } from '@/lib/utils'
 import { apiFetch, ApiError } from '@/lib/api'
 import { resolveLabel } from '@/lib/master-maps'
-import type { EmployeeListItem, MasterMaps } from '@/types/employee'
+import { fetchEmployeeRegistrations } from '@/lib/employee-registrations'
+import { onRegistrationDecided } from '@/lib/registration-events'
+import type { EmployeeListItem } from '@/types/employee'
 import { AddEmployeeDialog } from '@/components/employee/add-employee-dialog'
 import { EmployeeDetailDialog } from '@/components/employee/employee-detail-dialog'
+import { RegistrationDetailDialog } from '@/components/employee/registration-detail-dialog'
+import { useAuth } from '@/contexts/auth-context'
+import { useMasterMaps } from '@/contexts/master-maps-context'
+import { canManageEmployees } from '@/config/employee-options'
 
 export function EmployeeManagementPage() {
+  // 사원 추가는 최고관리자/관리자/부관리자만 할 수 있습니다.
+  const { me } = useAuth()
+  const canManage = canManageEmployees(me?.admin_role)
+  // 마스터컬렉션 매핑표는 앱이 켜질 때 한 번만 받아와 전역으로 공유합니다.
+  // (예전에는 이 페이지에 들어올 때마다 따로 불러왔습니다)
+  const { masterMaps, isLoading: isMasterMapsLoading } = useMasterMaps()
   const [employees, setEmployees] = useState<EmployeeListItem[] | null>(null)
-  const [masterMaps, setMasterMaps] = useState<MasterMaps | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   // 목록에서 클릭한 행의 임직원 _id. null이면 상세 다이얼로그가 닫힌 상태입니다.
@@ -50,17 +61,44 @@ export function EmployeeManagementPage() {
     null,
   )
 
+  // 신규 계정 신청자 목록 (관리자급만 조회/표시)
+  const [registrations, setRegistrations] = useState<
+    EmployeeListItem[] | null
+  >(null)
+  const [registrationsError, setRegistrationsError] = useState<string | null>(
+    null,
+  )
+  const [selectedRegistrationId, setSelectedRegistrationId] = useState<
+    string | null
+  >(null)
+
+  const loadRegistrations = useCallback(async () => {
+    if (!canManage) return
+    try {
+      const data = await fetchEmployeeRegistrations()
+      setRegistrations(data)
+      setRegistrationsError(null)
+    } catch (err) {
+      setRegistrationsError(
+        err instanceof ApiError
+          ? err.message
+          : '신청자 목록을 불러오는 중 알 수 없는 오류가 발생했습니다.',
+      )
+    }
+  }, [canManage])
+
+  useEffect(() => {
+    loadRegistrations()
+  }, [loadRegistrations])
+
   const loadData = useCallback(async () => {
     setIsLoading(true)
     setError(null)
     try {
-      // 임직원 목록 + 마스터 매핑표를 동시에 요청 (둘 다 끝나야 화면을 그릴 수 있음)
-      const [employeeData, masterMapsData] = await Promise.all([
-        apiFetch<EmployeeListItem[]>('/employees/?skip=0&limit=200'),
-        apiFetch<MasterMaps>('/organizations/master-maps/'),
-      ])
+      const employeeData = await apiFetch<EmployeeListItem[]>(
+        '/employees/?skip=0&limit=200',
+      )
       setEmployees(employeeData)
-      setMasterMaps(masterMapsData)
     } catch (err) {
       setError(
         err instanceof ApiError
@@ -96,6 +134,39 @@ export function EmployeeManagementPage() {
     }))
   }, [employees, masterMaps])
 
+  // 신청자 목록도 임직원 목록과 똑같은 방식(마스터컬렉션 _id -> 이름)으로 변환합니다.
+  const registrationRows = useMemo(() => {
+    if (!registrations || !masterMaps) return []
+    return registrations.map((reg) => ({
+      id: reg._id,
+      name: reg.name_kor,
+      employeeId: reg.employee_id,
+      loginId: reg.login_id,
+      department: resolveLabel(masterMaps.departments, reg.dept_id),
+      team: resolveLabel(masterMaps.teams, reg.team_id),
+      title: resolveLabel(masterMaps.titles, reg.title_id),
+      position: resolveLabel(masterMaps.positions, reg.position_id),
+      duty: resolveLabel(masterMaps.duties, reg.duty_id),
+      employmentType: resolveLabel(
+        masterMaps.employment_types,
+        reg.employment_type,
+      ),
+    }))
+  }, [registrations, masterMaps])
+
+  // 승인/반려가 처리되면 임직원 목록(통계 포함)과 신청자 목록을 함께 새로고침합니다.
+  const handleRegistrationDecided = useCallback(() => {
+    loadData()
+    loadRegistrations()
+  }, [loadData, loadRegistrations])
+
+  // 헤더 알림 벨의 드롭다운에서 승인/반려가 일어났을 때도 이 페이지가
+  // 최신 상태로 갱신되도록 전역 이벤트를 구독합니다.
+  useEffect(
+    () => onRegistrationDecided(handleRegistrationDecided),
+    [handleRegistrationDecided],
+  )
+
   const total = rows.length
   const countByEmploymentType = (label: string) =>
     rows.filter((row) => row.employmentType === label).length
@@ -117,13 +188,16 @@ export function EmployeeManagementPage() {
             <Filter />
             필터
           </Button>
-          <AddEmployeeDialog masterMaps={masterMaps} onCreated={loadData} />
+          {/* 사원 추가 권한(최고관리자/관리자/부관리자)이 없으면 버튼 자체를 숨깁니다 */}
+          {canManage && (
+            <AddEmployeeDialog masterMaps={masterMaps} onCreated={loadData} />
+          )}
         </div>
       </div>
 
       {error && <ErrorNotice message={error} onRetry={loadData} />}
 
-      {isLoading ? (
+      {isLoading || isMasterMapsLoading ? (
         <EmployeeListSkeleton />
       ) : (
         !error && (
@@ -265,6 +339,105 @@ export function EmployeeManagementPage() {
                 </Table>
               </div>
             </Card>
+
+            {/* 신규 계정 신청자 목록: 관리자급(최고관리자/관리자/부관리자)만 볼 수 있습니다 */}
+            {canManage && (
+              <Card className="gap-0">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    신규 계정 신청자 목록
+                    <Badge variant="secondary">{registrationRows.length}</Badge>
+                  </CardTitle>
+                </CardHeader>
+
+                {registrationsError && (
+                  <div className="px-4 pb-2">
+                    <ErrorNotice
+                      message={registrationsError}
+                      onRetry={loadRegistrations}
+                    />
+                  </div>
+                )}
+
+                <div className="px-4 pb-2">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="text-center">이름</TableHead>
+                        <TableHead className="text-center">사번</TableHead>
+                        <TableHead className="text-center">로그인 ID</TableHead>
+                        <TableHead className="text-center">부서</TableHead>
+                        <TableHead className="text-center">팀</TableHead>
+                        <TableHead className="text-center">직급</TableHead>
+                        <TableHead className="text-center">직책</TableHead>
+                        <TableHead className="text-center">직무</TableHead>
+                        <TableHead className="text-center">고용형태</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {registrationRows.length === 0 ? (
+                        <TableRow>
+                          <TableCell
+                            colSpan={9}
+                            className="h-24 text-center text-muted-foreground"
+                          >
+                            대기 중인 신청이 없습니다.
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        registrationRows.map((row) => (
+                          <TableRow
+                            key={row.id}
+                            onClick={() => setSelectedRegistrationId(row.id)}
+                            className="cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800/60"
+                          >
+                            <TableCell className="text-center font-medium">
+                              {row.name}
+                            </TableCell>
+                            <TableCell className="text-center text-muted-foreground">
+                              {row.employeeId}
+                            </TableCell>
+                            <TableCell className="text-center text-muted-foreground">
+                              {row.loginId}
+                            </TableCell>
+                            <TableCell className="text-center">
+                              <ToneBadge
+                                label={row.department}
+                                toneMap={DEPARTMENT_TONES}
+                              />
+                            </TableCell>
+                            <TableCell className="text-center">
+                              <ToneBadge label={row.team} toneMap={TEAM_TONES} />
+                            </TableCell>
+                            <TableCell className="text-center">
+                              <ToneBadge
+                                label={row.position}
+                                toneMap={POSITION_TONES}
+                              />
+                            </TableCell>
+                            <TableCell className="text-center">
+                              <ToneBadge
+                                label={row.title}
+                                toneMap={TITLE_TONES}
+                              />
+                            </TableCell>
+                            <TableCell className="text-center">
+                              <ToneBadge label={row.duty} toneMap={DUTY_TONES} />
+                            </TableCell>
+                            <TableCell className="text-center">
+                              <ToneBadge
+                                label={row.employmentType}
+                                toneMap={EMPLOYMENT_TYPE_TONES}
+                              />
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </Card>
+            )}
           </>
         )
       )}
@@ -274,6 +447,13 @@ export function EmployeeManagementPage() {
         masterMaps={masterMaps}
         onClose={() => setSelectedEmployeeId(null)}
         onUpdated={loadData}
+      />
+
+      <RegistrationDetailDialog
+        registrationId={selectedRegistrationId}
+        masterMaps={masterMaps}
+        onClose={() => setSelectedRegistrationId(null)}
+        onDecided={handleRegistrationDecided}
       />
     </div>
   )

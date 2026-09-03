@@ -32,11 +32,6 @@ class EmployeeCreateReq(BaseModel):
     desk_number: str | None = Field(default=None)
 
     # 2. 인사
-    # [DefaultOrgId 삭제] 예전에는 미배정 상태를 하드코딩된 _id(예: "소속없음"
-    # 부서의 임시 _id)로 채워 넣었지만, 그 값이 Redis 마스터컬렉션과
-    # 어긋나 있었다. 이제는 그냥 None(미지정)으로 두고, 실제 배정된
-    # 뒤에는 프론트엔드가 GET /organizations/master-maps/로 받아온
-    # 최신 데이터를 기준으로 이름을 표시한다.
     employee_id: str = Field(min_length=8, example="20260217")
     dept_id: str | None = Field(default=None)
     team_id: str | None = Field(default=None)
@@ -79,6 +74,7 @@ class EmployeeCreateRes(BaseModel):
 class EmployeeUpdateReq(BaseModel):
     # 0. ERP 정보
     login_id: str | None = Field(default=None, min_length=3)
+    password: str | None = Field(default=None, min_length=8)
     admin_role: AdminRole | None = Field(default=None)
 
     # 1. 기본 정보
@@ -123,6 +119,11 @@ class EmployeeProfileImageRes(BaseModel):
     profile_image_url: str  # S3에 업로드된 프로필 사진 url
 
 
+# 신규 계정 신청(Registration) 반려(D) API - 응답(Res)
+class EmployeeRegistrationRejectRes(BaseModel):
+    rejected: bool = True
+
+
 # 임직원(Employee) 목록 조회(R-L) API - 응답(Res)
 class EmployeeReadListRes(BaseModel):
     id: str = Field(..., alias="_id")  # MongoDB id
@@ -130,12 +131,12 @@ class EmployeeReadListRes(BaseModel):
     employee_id: str  # 사번
     login_id: str  # ERP 로그인id
     # [DefaultOrgId 삭제] 미배정 상태를 None으로 허용하므로 전부 Optional
-    dept_id: str | None  # 부서id
-    team_id: str | None  # 팀id
-    position_id: str | None  # 직급id
-    title_id: str | None  # 직책id
-    duty_id: str | None  # 직무id
-    employment_type: str | None  # 고용형태id
+    dept_id: str | None = Field(default=None)  # 부서id
+    team_id: str | None = Field(default=None)  # 팀id
+    position_id: str | None = Field(default=None)  # 직급id
+    title_id: str | None = Field(default=None)  # 직책id
+    duty_id: str | None = Field(default=None)  # 직무id
+    employment_type: str | None = Field(default=None)  # 고용형태id
 
 
 # 임직원(Employee) 상세 조회(R-D) API - 응답(Res)
@@ -148,46 +149,52 @@ class EmployeeReadDetailRes(BaseModel):
     # 1. 기본 정보
     name_kor: str  # 성명(한국어)
     name_eng: str  # 성명(영어)
-    name_jpn: str | None  # 성명(일본어)
-    name_chn: str | None  # 성명(중국어)
+    name_jpn: str | None = Field(default=None)  # 성명(일본어)
+    name_chn: str | None = Field(default=None)  # 성명(중국어)
     gender: Gender  # 성별
     birth_date: str  # 생년월일
-    profile_image_url: str | None  # 프로필 사진 url(S3)
+    profile_image_url: str | None = Field(default=None)  # 프로필 사진 url(S3)
     phone_number: str  # 휴대폰 번호
-    address: str | None  # 거주지 주소
+    address: str | None = Field(default=None)  # 거주지 주소
     email: str  # 개인 이메일
-    email_company: str | None  # 회사 이메일
-    desk_number: str | None  # 데스크 직통 전화번호
+    email_company: str | None = Field(default=None)  # 회사 이메일
+    desk_number: str | None = Field(default=None)  # 데스크 직통 전화번호
 
     # 2. 인사
     employee_id: str  # 사번
-    dept_id: str | None  # 부서id
-    team_id: str | None  # 팀id
-    position_id: str | None  # 직급/직위id
-    title_id: str | None  # 직책id
-    duty_id: str | None  # 직무id
-    employment_type: str | None  # 고용형태id
-    exp_level: ExpLevel | None  # 신입/경력 여부
+    dept_id: str | None = Field(default=None)  # 부서id
+    team_id: str | None = Field(default=None)  # 팀id
+    position_id: str | None = Field(default=None)  # 직급/직위id
+    title_id: str | None = Field(default=None)  # 직책id
+    duty_id: str | None = Field(default=None)  # 직무id
+    employment_type: str | None = Field(default=None)  # 고용형태id
+    exp_level: ExpLevel | None = Field(default=None)  # 신입/경력 여부
     created_at: datetime  # 입사일
     updated_at: datetime  # 수정일
-    deleted_at: datetime | None  # 퇴사일
-    last_sign_in_at: datetime | None  # 최근 접속일
+    deleted_at: datetime | None = Field(default=None)  # 퇴사일
+    last_sign_in_at: datetime | None = Field(default=None)  # 최근 접속일
 
     # 3. 보유능력
     driver_license_type: DriverLicenseType = (
         DriverLicenseType.NONE
     )  # 운전면허 종류(무면허, 1종, 2종 등)
-    owned_vehicle: str | None  # 보유 차량 종류
-    owned_vehicle_number: str | None  # 보유 차량 번호
+    owned_vehicle: str | None = Field(default=None)  # 보유 차량 종류
+    owned_vehicle_number: str | None = Field(default=None)  # 보유 차량 번호
     languages: list[LanguageSkill]
 
     # 4. 입사문서 파일 url(S3)
-    resident_registration_url: str | None  # 주민등록등본 url
-    graduation_certificate_url: str | None  # 최종 학력 증명 서류 url
-    transcript_url: str | None  # 성적 증명 서류 url
-    career_certificate_url: str | None  # 이전 직장 경력 증빙 서류 url
-    employment_contract_url: str | None  # 근로계약서 url
+    resident_registration_url: str | None = Field(
+        default=None
+    )  # 주민등록등본 url
+    graduation_certificate_url: str | None = Field(
+        default=None
+    )  # 최종 학력 증명 서류 url
+    transcript_url: str | None = Field(default=None)  # 성적 증명 서류 url
+    career_certificate_url: str | None = Field(
+        default=None
+    )  # 이전 직장 경력 증빙 서류 url
+    employment_contract_url: str | None = Field(default=None)  # 근로계약서 url
 
     # 5. 결재 관련 파일 url(S3)
-    signature_url: str | None  # 결재 사인 url
-    registered_seal_url: str | None  # 결재 인감 url
+    signature_url: str | None = Field(default=None)  # 결재 사인 url
+    registered_seal_url: str | None = Field(default=None)  # 결재 인감 url

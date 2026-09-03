@@ -8,3 +8,15 @@ export function resolveLabel(
   if (!id) return '-'
   return map[id] ?? '-'
 }
+
+// resolveLabel의 반대 방향: 표시값(이름)으로 _id를 찾습니다.
+// 마스터컬렉션 문서의 _id는 매번 새로 생성되는 값이라 "소속없음"/
+// "임시대기"처럼 정해진 기본값의 _id를 코드에 미리 적어둘 수 없어서,
+// 이렇게 이름으로 역으로 찾아야 합니다. 없으면 null을 돌려줍니다.
+export function findIdByLabel(
+  map: Record<string, string>,
+  label: string,
+): string | null {
+  const entry = Object.entries(map).find(([, name]) => name === label)
+  return entry ? entry[0] : null
+}

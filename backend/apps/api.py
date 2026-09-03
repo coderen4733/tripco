@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 
+from apps.alarm.router import alarm_router
 from apps.auth.router import auth_router
 from apps.employee.router import employee_router
 from apps.organization.department.router import dept_router
@@ -62,3 +63,6 @@ api_router.include_router(
 
 # 3. 인증/인가(Auth)
 api_router.include_router(auth_router, prefix="/auth", tags=["Auth 인증/인가"])
+
+# 4. 알람(Alarm)
+api_router.include_router(alarm_router, prefix="/alarms", tags=["Alarm 알람"])

@@ -15,6 +15,7 @@ import {
   CalendarCheck,
   Receipt,
   Layers,
+  Bell,
   Database,
   MapPin,
   UtensilsCrossed,
@@ -74,8 +75,10 @@ export const navMenu: NavItem[] = [
   },
   {
     title: '기타 관리',
-    path: '/etc',
     icon: Layers,
+    children: [
+      { title: '알림 관리', path: '/etc/alarms', icon: Bell },
+    ],
   },
   {
     title: '데이터 관리',

@@ -2,21 +2,8 @@
 // '사원 추가' 폼과 같은 레이아웃을 쓰되, 대부분의 값은 각 칸 오른쪽의
 // 연필(수정) 버튼을 눌러 바로 그 자리에서 고치고 저장할 수 있습니다.
 // (구사 언어 / 시스템 정보 / 입사문서·결재 관련 파일은 읽기 전용으로 남겨둡니다)
-import {
-  useCallback,
-  useEffect,
-  useState,
-  type ReactNode,
-} from 'react'
-import {
-  AlertCircle,
-  Check,
-  Loader2,
-  Pencil,
-  Plus,
-  Trash2,
-  X,
-} from 'lucide-react'
+import { useCallback, useEffect, useState } from 'react'
+import { AlertCircle, KeyRound, Loader2 } from 'lucide-react'
 import {
   Dialog,
   DialogClose,
@@ -30,24 +17,29 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import { Skeleton } from '@/components/ui/skeleton'
 import { apiFetch, ApiError } from '@/lib/api'
 import { resolveLabel } from '@/lib/master-maps'
 import { uploadEmployeeProfileImage } from '@/lib/employee-profile-image'
 import { ProfileAvatarUpload } from '@/components/employee/profile-avatar-upload'
 import {
+  DetailSkeleton,
+  EditableLanguagesSection,
+  EditableMasterSelectField,
+  EditableSelectField,
+  EditableTextField,
+  FileListSection,
+  formatDateTime,
+  FormSection,
+  ReadOnlyField,
+  ReadOnlyFileField,
+} from '@/components/employee/editable-detail-fields'
+import { useAuth } from '@/contexts/auth-context'
+import {
   ADMIN_ROLE_OPTIONS,
+  canManageEmployees,
   DRIVER_LICENSE_OPTIONS,
   EXP_LEVEL_OPTIONS,
   GENDER_OPTIONS,
-  UNASSIGNED_VALUE,
 } from '@/config/employee-options'
 import type {
   EmployeeDetail,
@@ -55,24 +47,6 @@ import type {
   LanguageSkillPayload,
   MasterMaps,
 } from '@/types/employee'
-
-// created_at/updated_at/deleted_at처럼 ISO 날짜 문자열로 오는 값을
-// "2026.08.12 13:21" 형태로 보기 좋게 바꿔줍니다.
-function formatDateTime(value: string | null): string {
-  if (!value) return '-'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return date
-    .toLocaleString('ko-KR', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-    })
-    .replace(/\. /g, '.')
-    .replace(/\.$/, '')
-}
 
 interface EmployeeDetailDialogProps {
   // 상세 조회할 임직원의 _id. null이면 다이얼로그가 닫힌 상태입니다.
@@ -89,6 +63,14 @@ export function EmployeeDetailDialog({
   onClose,
   onUpdated,
 }: EmployeeDetailDialogProps) {
+  // 권한 체계: 타인의 정보 수정은 최고관리자/관리자/부관리자만 가능하고,
+  // 본인("내 정보") 수정은 예외적으로 누구나 가능합니다. 다만 권한 등급
+  // (admin_role) 자체는 본인이라도 관리 권한이 있어야만 바꿀 수 있습니다.
+  const { employeeId: myEmployeeId, me: currentUser } = useAuth()
+  const isOwn = employeeId !== null && employeeId === myEmployeeId
+  const canManage = canManageEmployees(currentUser?.admin_role)
+  const canEdit = isOwn || canManage
+
   const [detail, setDetail] = useState<EmployeeDetail | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -97,6 +79,20 @@ export function EmployeeDetailDialog({
   const [profileImageError, setProfileImageError] = useState<string | null>(
     null,
   )
+  // "비밀번호 변경" 버튼을 누르면 펼쳐지는 작은 패널의 상태입니다.
+  const [isChangingPassword, setIsChangingPassword] = useState(false)
+  const [newPassword, setNewPassword] = useState('')
+  const [newPasswordConfirm, setNewPasswordConfirm] = useState('')
+  const [passwordError, setPasswordError] = useState<string | null>(null)
+  const [isSavingPassword, setIsSavingPassword] = useState(false)
+
+  // 다른 임직원을 선택하거나 다이얼로그를 닫으면 비밀번호 변경 패널도 초기화합니다.
+  const resetPasswordChange = () => {
+    setIsChangingPassword(false)
+    setNewPassword('')
+    setNewPasswordConfirm('')
+    setPasswordError(null)
+  }
 
   // 상세 정보를 (다시) 받아옵니다. 최초 진입 시, 그리고 항목을 저장한 직후에 씁니다.
   const loadDetail = useCallback(async () => {
@@ -106,6 +102,7 @@ export function EmployeeDetailDialog({
   }, [employeeId])
 
   useEffect(() => {
+    resetPasswordChange()
     if (!employeeId) {
       setDetail(null)
       setError(null)
@@ -183,6 +180,39 @@ export function EmployeeDetailDialog({
     }
   }
 
+  // 비밀번호 확인 칸 아래에 실시간으로 보여줄 안내 문구입니다. (사원 추가
+  // 폼의 비밀번호 확인 검증과 동일한 문구를 씁니다)
+  const passwordConfirmError = !newPassword
+    ? null
+    : !newPasswordConfirm
+      ? '비밀번호 확인을 입력해주세요.'
+      : newPasswordConfirm !== newPassword
+        ? '비밀번호와 비밀번호 확인이 일치하지 않습니다.'
+        : null
+
+  const handlePasswordChangeSubmit = async () => {
+    if (newPassword.length < 8) {
+      setPasswordError('비밀번호는 8자 이상 입력해야 합니다.')
+      return
+    }
+    if (passwordConfirmError) {
+      setPasswordError(passwordConfirmError)
+      return
+    }
+    setPasswordError(null)
+    setIsSavingPassword(true)
+    try {
+      await saveFields({ password: newPassword })
+      resetPasswordChange()
+    } catch (err) {
+      setPasswordError(
+        err instanceof ApiError ? err.message : '비밀번호 변경에 실패했습니다.',
+      )
+    } finally {
+      setIsSavingPassword(false)
+    }
+  }
+
   return (
     <Dialog
       open={employeeId !== null}
@@ -192,13 +222,95 @@ export function EmployeeDetailDialog({
     >
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>임직원 상세 정보</DialogTitle>
-          <DialogDescription>
-            {detail
-              ? `${detail.name_kor}(${detail.employee_id}) 임직원의 상세 정보입니다.`
-              : '임직원의 상세 정보를 불러옵니다.'}
-          </DialogDescription>
+          {/* 제목/설명은 왼쪽에, "비밀번호 변경" 버튼은 오른쪽에 둡니다.
+              오른쪽 상단의 닫기(X) 버튼과 겹치지 않도록 pr-8로 여유를 둡니다. */}
+          <div className="flex items-start justify-between gap-4 pr-8">
+            <div className="flex flex-col gap-1.5">
+              <DialogTitle>임직원 상세 정보</DialogTitle>
+              <DialogDescription>
+                {detail
+                  ? `${detail.name_kor}(${detail.employee_id}) 임직원의 상세 정보입니다.`
+                  : '임직원의 상세 정보를 불러옵니다.'}
+              </DialogDescription>
+            </div>
+            {canEdit && detail && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="shrink-0"
+                onClick={() => {
+                  if (isChangingPassword) resetPasswordChange()
+                  else setIsChangingPassword(true)
+                }}
+              >
+                <KeyRound />
+                비밀번호 변경
+              </Button>
+            )}
+          </div>
         </DialogHeader>
+
+        {isChangingPassword && (
+          <div className="flex flex-col gap-3 rounded-lg border border-input bg-muted/30 p-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="detail_new_password">새 비밀번호</Label>
+                <Input
+                  id="detail_new_password"
+                  type="password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  placeholder="8자 이상"
+                  autoComplete="new-password"
+                  className="h-8"
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="detail_new_password_confirm">
+                  새 비밀번호 확인
+                </Label>
+                <Input
+                  id="detail_new_password_confirm"
+                  type="password"
+                  value={newPasswordConfirm}
+                  onChange={(e) => setNewPasswordConfirm(e.target.value)}
+                  placeholder="비밀번호를 한 번 더 입력하세요"
+                  autoComplete="new-password"
+                  className="h-8"
+                />
+                {passwordConfirmError && (
+                  <p className="text-xs text-destructive">
+                    {passwordConfirmError}
+                  </p>
+                )}
+              </div>
+            </div>
+            {passwordError && (
+              <p className="text-xs text-destructive">{passwordError}</p>
+            )}
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={resetPasswordChange}
+                disabled={isSavingPassword}
+              >
+                취소
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                onClick={handlePasswordChangeSubmit}
+                disabled={isSavingPassword}
+              >
+                {isSavingPassword && <Loader2 className="animate-spin" />}
+                변경
+              </Button>
+            </div>
+          </div>
+        )}
 
         {error && (
           <div className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
@@ -212,6 +324,27 @@ export function EmployeeDetailDialog({
         {!isLoading && detail && masterMaps && (
           <div className="flex flex-col gap-6">
             <FormSection title="계정 정보">
+              <EditableTextField
+                label="아이디"
+                field="login_id"
+                value={detail.login_id}
+                canEdit={canEdit}
+                onSave={handleFieldSave}
+              />
+              {/* 권한 등급은 본인이라도 관리 권한(canManage)이 있어야만 바꿀 수 있습니다 */}
+              <EditableSelectField
+                label="권한"
+                field="admin_role"
+                value={detail.admin_role}
+                options={ADMIN_ROLE_OPTIONS}
+                canEdit={canManage}
+                onSave={handleFieldSave}
+              />
+            </FormSection>
+
+            <Separator />
+
+            <FormSection title="기본 정보">
               <div className="sm:col-span-2">
                 <ProfileAvatarUpload
                   name={detail.name_kor}
@@ -225,42 +358,27 @@ export function EmployeeDetailDialog({
                       : null
                   }
                   isUploading={isUploadingProfileImage}
+                  editable={canEdit}
                   onCropped={handleProfileImageCropped}
                 />
                 {profileImageError && (
-                  <p className="mt-1.5 text-xs text-destructive">
+                  <p className="mt-1.5 text-center text-xs text-destructive">
                     {profileImageError}
                   </p>
                 )}
               </div>
               <EditableTextField
-                label="아이디"
-                field="login_id"
-                value={detail.login_id}
-                onSave={handleFieldSave}
-              />
-              <EditableSelectField
-                label="권한"
-                field="admin_role"
-                value={detail.admin_role}
-                options={ADMIN_ROLE_OPTIONS}
-                onSave={handleFieldSave}
-              />
-            </FormSection>
-
-            <Separator />
-
-            <FormSection title="기본 정보">
-              <EditableTextField
                 label="성명"
                 field="name_kor"
                 value={detail.name_kor}
+                canEdit={canEdit}
                 onSave={handleFieldSave}
               />
               <EditableTextField
                 label="성명(영어)"
                 field="name_eng"
                 value={detail.name_eng}
+                canEdit={canEdit}
                 onSave={handleFieldSave}
               />
               <EditableTextField
@@ -268,6 +386,7 @@ export function EmployeeDetailDialog({
                 field="name_jpn"
                 value={detail.name_jpn}
                 nullable
+                canEdit={canEdit}
                 onSave={handleFieldSave}
               />
               <EditableTextField
@@ -275,6 +394,7 @@ export function EmployeeDetailDialog({
                 field="name_chn"
                 value={detail.name_chn}
                 nullable
+                canEdit={canEdit}
                 onSave={handleFieldSave}
               />
               <EditableSelectField
@@ -282,6 +402,7 @@ export function EmployeeDetailDialog({
                 field="gender"
                 value={detail.gender}
                 options={GENDER_OPTIONS}
+                canEdit={canEdit}
                 onSave={handleFieldSave}
               />
               <EditableTextField
@@ -289,6 +410,7 @@ export function EmployeeDetailDialog({
                 field="birth_date"
                 value={detail.birth_date}
                 type="date"
+                canEdit={canEdit}
                 onSave={handleFieldSave}
               />
               <EditableTextField
@@ -296,6 +418,7 @@ export function EmployeeDetailDialog({
                 field="phone_number"
                 value={detail.phone_number}
                 type="tel"
+                canEdit={canEdit}
                 onSave={handleFieldSave}
               />
               <EditableTextField
@@ -303,6 +426,7 @@ export function EmployeeDetailDialog({
                 field="address"
                 value={detail.address}
                 nullable
+                canEdit={canEdit}
                 onSave={handleFieldSave}
               />
               <EditableTextField
@@ -310,6 +434,7 @@ export function EmployeeDetailDialog({
                 field="email"
                 value={detail.email}
                 type="email"
+                canEdit={canEdit}
                 onSave={handleFieldSave}
               />
               <EditableTextField
@@ -318,6 +443,7 @@ export function EmployeeDetailDialog({
                 value={detail.email_company}
                 type="email"
                 nullable
+                canEdit={canEdit}
                 onSave={handleFieldSave}
               />
               <EditableTextField
@@ -325,6 +451,7 @@ export function EmployeeDetailDialog({
                 field="desk_number"
                 value={detail.desk_number}
                 nullable
+                canEdit={canEdit}
                 onSave={handleFieldSave}
               />
             </FormSection>
@@ -336,6 +463,7 @@ export function EmployeeDetailDialog({
                 label="사번"
                 field="employee_id"
                 value={detail.employee_id}
+                canEdit={canEdit}
                 onSave={handleFieldSave}
               />
               <EditableMasterSelectField
@@ -347,6 +475,7 @@ export function EmployeeDetailDialog({
                   detail.dept_id,
                 )}
                 options={masterMaps.departments}
+                canEdit={canEdit}
                 onSave={handleFieldSave}
               />
               <EditableMasterSelectField
@@ -355,6 +484,7 @@ export function EmployeeDetailDialog({
                 value={detail.team_id}
                 displayValue={resolveLabel(masterMaps.teams, detail.team_id)}
                 options={masterMaps.teams}
+                canEdit={canEdit}
                 onSave={handleFieldSave}
               />
               <EditableMasterSelectField
@@ -366,6 +496,7 @@ export function EmployeeDetailDialog({
                   detail.position_id,
                 )}
                 options={masterMaps.positions}
+                canEdit={canEdit}
                 onSave={handleFieldSave}
               />
               <EditableMasterSelectField
@@ -377,6 +508,7 @@ export function EmployeeDetailDialog({
                   detail.title_id,
                 )}
                 options={masterMaps.titles}
+                canEdit={canEdit}
                 onSave={handleFieldSave}
               />
               <EditableMasterSelectField
@@ -385,6 +517,7 @@ export function EmployeeDetailDialog({
                 value={detail.duty_id}
                 displayValue={resolveLabel(masterMaps.duties, detail.duty_id)}
                 options={masterMaps.duties}
+                canEdit={canEdit}
                 onSave={handleFieldSave}
               />
               <EditableMasterSelectField
@@ -396,6 +529,7 @@ export function EmployeeDetailDialog({
                   detail.employment_type,
                 )}
                 options={masterMaps.employment_types}
+                canEdit={canEdit}
                 onSave={handleFieldSave}
               />
               <EditableSelectField
@@ -403,6 +537,7 @@ export function EmployeeDetailDialog({
                 field="exp_level"
                 value={detail.exp_level ?? '신입'}
                 options={EXP_LEVEL_OPTIONS}
+                canEdit={canEdit}
                 onSave={handleFieldSave}
               />
             </FormSection>
@@ -415,6 +550,7 @@ export function EmployeeDetailDialog({
                 field="driver_license_type"
                 value={detail.driver_license_type}
                 options={DRIVER_LICENSE_OPTIONS}
+                canEdit={canEdit}
                 onSave={handleFieldSave}
               />
               <EditableTextField
@@ -422,6 +558,7 @@ export function EmployeeDetailDialog({
                 field="owned_vehicle"
                 value={detail.owned_vehicle}
                 nullable
+                canEdit={canEdit}
                 onSave={handleFieldSave}
               />
               <EditableTextField
@@ -429,6 +566,7 @@ export function EmployeeDetailDialog({
                 field="owned_vehicle_number"
                 value={detail.owned_vehicle_number}
                 nullable
+                canEdit={canEdit}
                 onSave={handleFieldSave}
               />
             </FormSection>
@@ -436,6 +574,7 @@ export function EmployeeDetailDialog({
             {/* 구사 언어는 운전면허 등과 함께 '보유 능력'에 속하므로 구분선을 넣지 않습니다 */}
             <EditableLanguagesSection
               languages={detail.languages}
+              canEdit={canEdit}
               onSave={handleLanguagesSave}
             />
 
@@ -505,566 +644,5 @@ export function EmployeeDetailDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  )
-}
-
-function DetailSkeleton() {
-  return (
-    <div className="flex flex-col gap-3">
-      {Array.from({ length: 6 }).map((_, i) => (
-        <Skeleton key={i} className="h-8 w-full" />
-      ))}
-    </div>
-  )
-}
-
-// 폼 안에서 항목들을 묶어 제목을 붙이는 섹션 컨테이너 (사원 추가 폼과 동일한 레이아웃)
-function FormSection({
-  title,
-  children,
-}: {
-  title: string
-  children: ReactNode
-}) {
-  return (
-    <div className="flex flex-col gap-4">
-      <h3 className="text-sm font-semibold text-foreground">{title}</h3>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">{children}</div>
-    </div>
-  )
-}
-
-// 입력칸처럼 보이지만 수정은 안 되는, 읽기 전용 값 표시 칸
-// (구사 언어 / 시스템 정보처럼 이 다이얼로그에서 수정을 지원하지 않는 항목에 씁니다)
-function ReadOnlyField({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex flex-col gap-1.5">
-      <Label>{label}</Label>
-      <div className="flex h-8 items-center rounded-lg border border-input bg-muted/30 px-2.5 text-sm text-foreground">
-        {value}
-      </div>
-    </div>
-  )
-}
-
-// 입사문서/결재 관련 파일처럼, 항목을 한 행에 하나씩 세로로 쌓아 보여주는 섹션
-// (다른 섹션들은 2열 그리드지만, 파일 목록은 이름이 길어서 1열로 배치합니다)
-function FileListSection({
-  title,
-  children,
-}: {
-  title: string
-  children: ReactNode
-}) {
-  return (
-    <div className="flex flex-col gap-4">
-      <h3 className="text-sm font-semibold text-foreground">{title}</h3>
-      <div className="flex flex-col gap-4">{children}</div>
-    </div>
-  )
-}
-
-// 파일 업로드 메뉴가 아직 없어서 대부분 값이 비어있습니다.
-// url이 있으면 새 탭에서 열어볼 수 있는 링크로, 없으면 대시(-)로 보여줍니다.
-function ReadOnlyFileField({
-  label,
-  url,
-}: {
-  label: string
-  url: string | null
-}) {
-  return (
-    <div className="flex flex-col gap-1.5">
-      <Label>{label}</Label>
-      <div className="flex h-8 items-center rounded-lg border border-input bg-muted/30 px-2.5 text-sm">
-        {url ? (
-          <a
-            href={url}
-            target="_blank"
-            rel="noreferrer"
-            className="text-primary underline underline-offset-2"
-          >
-            파일 보기
-          </a>
-        ) : (
-          <span className="text-foreground">-</span>
-        )}
-      </div>
-    </div>
-  )
-}
-
-// ── 여기서부터는 '수정 가능한' 필드 3종입니다 ─────────────────────────────
-// 셋 다 같은 뼈대(라벨 + 값/입력칸 + 연필·저장 버튼)를 쓰므로
-// EditableFieldShell 하나로 겉모습을 통일하고, 안쪽 입력 위젯만 다르게 씁니다.
-
-type SaveFn = (
-  field: keyof EmployeeUpdatePayload,
-  value: string | null,
-) => Promise<void>
-
-// 수정 가능한 필드의 공통 뼈대: 평소엔 값만 보여주다가, 연필 버튼을 누르면
-// 입력칸 + 저장 버튼으로 바뀌고, 저장이 끝나면 다시 평소 모습으로 돌아옵니다.
-function EditableFieldShell({
-  label,
-  isEditing,
-  isSaving,
-  error,
-  displayValue,
-  onStartEdit,
-  onSave,
-  onCancel,
-  children,
-}: {
-  label: string
-  isEditing: boolean
-  isSaving: boolean
-  error: string | null
-  displayValue: string
-  onStartEdit: () => void
-  onSave: () => void
-  onCancel: () => void
-  children: ReactNode
-}) {
-  return (
-    <div className="flex flex-col gap-1.5">
-      <Label>{label}</Label>
-      <div className="flex items-center gap-1.5">
-        <div className="min-w-0 flex-1">
-          {isEditing ? (
-            children
-          ) : (
-            <div className="flex h-8 items-center rounded-lg border border-input bg-muted/30 px-2.5 text-sm text-foreground">
-              {displayValue || '-'}
-            </div>
-          )}
-        </div>
-        {isEditing && (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            onClick={onCancel}
-            disabled={isSaving}
-            aria-label="수정 취소"
-          >
-            <X />
-          </Button>
-        )}
-        <Button
-          type="button"
-          variant="outline"
-          size="icon-sm"
-          onClick={isEditing ? onSave : onStartEdit}
-          disabled={isSaving}
-          aria-label={isEditing ? '저장' : '수정'}
-        >
-          {isSaving ? (
-            <Loader2 className="animate-spin" />
-          ) : isEditing ? (
-            <Check />
-          ) : (
-            <Pencil />
-          )}
-        </Button>
-      </div>
-      {error && <p className="text-xs text-destructive">{error}</p>}
-    </div>
-  )
-}
-
-// 자유 입력 텍스트 필드 (성명, 연락처, 이메일, 생년월일 등)
-function EditableTextField({
-  label,
-  field,
-  value,
-  type = 'text',
-  nullable = false,
-  autoComplete = 'off',
-  onSave,
-}: {
-  label: string
-  field: keyof EmployeeUpdatePayload
-  value: string | null
-  type?: string
-  nullable?: boolean
-  autoComplete?: string
-  onSave: SaveFn
-}) {
-  const [isEditing, setIsEditing] = useState(false)
-  const [draft, setDraft] = useState(value ?? '')
-  const [isSaving, setIsSaving] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  const startEdit = () => {
-    setDraft(value ?? '')
-    setError(null)
-    setIsEditing(true)
-  }
-  const cancelEdit = () => {
-    setIsEditing(false)
-    setError(null)
-  }
-  const save = async () => {
-    setIsSaving(true)
-    setError(null)
-    try {
-      const trimmed = draft.trim()
-      await onSave(field, nullable && trimmed === '' ? null : trimmed)
-      setIsEditing(false)
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : '저장에 실패했습니다.')
-    } finally {
-      setIsSaving(false)
-    }
-  }
-
-  return (
-    <EditableFieldShell
-      label={label}
-      isEditing={isEditing}
-      isSaving={isSaving}
-      error={error}
-      displayValue={value ?? '-'}
-      onStartEdit={startEdit}
-      onSave={save}
-      onCancel={cancelEdit}
-    >
-      <Input
-        type={type}
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        className="h-8"
-        autoFocus
-        autoComplete={autoComplete}
-      />
-    </EditableFieldShell>
-  )
-}
-
-// 성별/운전면허/권한/신입-경력처럼, 정해진 문자열 목록 중 하나를 고르는 필드
-function EditableSelectField({
-  label,
-  field,
-  value,
-  options,
-  onSave,
-}: {
-  label: string
-  field: keyof EmployeeUpdatePayload
-  value: string
-  options: readonly string[]
-  onSave: SaveFn
-}) {
-  const [isEditing, setIsEditing] = useState(false)
-  const [draft, setDraft] = useState(value)
-  const [isSaving, setIsSaving] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  const startEdit = () => {
-    setDraft(value)
-    setError(null)
-    setIsEditing(true)
-  }
-  const cancelEdit = () => {
-    setIsEditing(false)
-    setError(null)
-  }
-  const save = async () => {
-    setIsSaving(true)
-    setError(null)
-    try {
-      await onSave(field, draft)
-      setIsEditing(false)
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : '저장에 실패했습니다.')
-    } finally {
-      setIsSaving(false)
-    }
-  }
-
-  return (
-    <EditableFieldShell
-      label={label}
-      isEditing={isEditing}
-      isSaving={isSaving}
-      error={error}
-      displayValue={value}
-      onStartEdit={startEdit}
-      onSave={save}
-      onCancel={cancelEdit}
-    >
-      <Select value={draft} onValueChange={(v) => setDraft(v as string)}>
-        <SelectTrigger className="h-8 w-full">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {options.map((option) => (
-            <SelectItem key={option} value={option}>
-              {option}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </EditableFieldShell>
-  )
-}
-
-// 소속부서/팀/직급/직책/직무/고용형태처럼, 마스터컬렉션 매핑표({_id: 표시값})
-// 중 하나를 고르는 필드. 화면엔 이름이 보이지만 실제로 저장되는 값은 _id입니다.
-function EditableMasterSelectField({
-  label,
-  field,
-  value,
-  displayValue,
-  options,
-  onSave,
-}: {
-  label: string
-  field: keyof EmployeeUpdatePayload
-  value: string | null
-  displayValue: string
-  options: Record<string, string>
-  onSave: SaveFn
-}) {
-  const [isEditing, setIsEditing] = useState(false)
-  const [draft, setDraft] = useState(value ?? UNASSIGNED_VALUE)
-  const [isSaving, setIsSaving] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const items = { [UNASSIGNED_VALUE]: '미지정', ...options }
-
-  const startEdit = () => {
-    setDraft(value ?? UNASSIGNED_VALUE)
-    setError(null)
-    setIsEditing(true)
-  }
-  const cancelEdit = () => {
-    setIsEditing(false)
-    setError(null)
-  }
-  const save = async () => {
-    setIsSaving(true)
-    setError(null)
-    try {
-      await onSave(field, draft === UNASSIGNED_VALUE ? null : draft)
-      setIsEditing(false)
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : '저장에 실패했습니다.')
-    } finally {
-      setIsSaving(false)
-    }
-  }
-
-  return (
-    <EditableFieldShell
-      label={label}
-      isEditing={isEditing}
-      isSaving={isSaving}
-      error={error}
-      displayValue={displayValue}
-      onStartEdit={startEdit}
-      onSave={save}
-      onCancel={cancelEdit}
-    >
-      <Select
-        items={items}
-        value={draft}
-        onValueChange={(v) => setDraft(v as string)}
-      >
-        <SelectTrigger className="h-8 w-full">
-          <SelectValue placeholder="선택하세요" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value={UNASSIGNED_VALUE}>미지정</SelectItem>
-          {Object.entries(options).map(([optionId, name]) => (
-            <SelectItem key={optionId} value={optionId}>
-              {name}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </EditableFieldShell>
-  )
-}
-
-// 구사 언어 섹션. 다른 필드들과 달리 값이 여러 개(배열)라서, 섹션 제목 옆의
-// 연필 버튼으로 전체를 한 번에 수정 모드로 바꾸고, "언어 추가"로 줄을 늘리거나
-// 휴지통 버튼으로 줄을 지운 다음 저장 버튼으로 한꺼번에 저장합니다.
-function EditableLanguagesSection({
-  languages,
-  onSave,
-}: {
-  languages: LanguageSkillPayload[]
-  onSave: (languages: LanguageSkillPayload[]) => Promise<void>
-}) {
-  const [isEditing, setIsEditing] = useState(false)
-  const [draftRows, setDraftRows] = useState<LanguageSkillPayload[]>([])
-  const [isSaving, setIsSaving] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  const startEdit = () => {
-    setDraftRows(languages.map((lang) => ({ ...lang })))
-    setError(null)
-    setIsEditing(true)
-  }
-  const cancelEdit = () => {
-    setIsEditing(false)
-    setError(null)
-  }
-  const addRow = () => {
-    setDraftRows((rows) => [
-      ...rows,
-      { language: '', level: '', certification: null },
-    ])
-  }
-  const removeRow = (index: number) => {
-    setDraftRows((rows) => rows.filter((_, i) => i !== index))
-  }
-  const updateRow = (index: number, patch: Partial<LanguageSkillPayload>) => {
-    setDraftRows((rows) =>
-      rows.map((row, i) => (i === index ? { ...row, ...patch } : row)),
-    )
-  }
-  const save = async () => {
-    setIsSaving(true)
-    setError(null)
-    try {
-      // 언어명/숙련도를 하나라도 비워둔 줄은 저장하지 않습니다.
-      const payload = draftRows
-        .filter(
-          (row) => row.language.trim() !== '' && row.level.trim() !== '',
-        )
-        .map((row) => ({
-          language: row.language.trim(),
-          level: row.level.trim(),
-          certification:
-            row.certification?.trim() === '' ? null : row.certification,
-        }))
-      await onSave(payload)
-      setIsEditing(false)
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : '저장에 실패했습니다.')
-    } finally {
-      setIsSaving(false)
-    }
-  }
-
-  return (
-    <div className="flex flex-col gap-3">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-foreground">구사 언어</h3>
-        {isEditing ? (
-          <div className="flex items-center gap-1.5">
-            <Button type="button" variant="outline" size="sm" onClick={addRow}>
-              <Plus />
-              언어 추가
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              onClick={cancelEdit}
-              disabled={isSaving}
-              aria-label="수정 취소"
-            >
-              <X />
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="icon-sm"
-              onClick={save}
-              disabled={isSaving}
-              aria-label="저장"
-            >
-              {isSaving ? <Loader2 className="animate-spin" /> : <Check />}
-            </Button>
-          </div>
-        ) : (
-          <Button
-            type="button"
-            variant="outline"
-            size="icon-sm"
-            onClick={startEdit}
-            aria-label="수정"
-          >
-            <Pencil />
-          </Button>
-        )}
-      </div>
-
-      {!isEditing &&
-        (languages.length === 0 ? (
-          <p className="text-xs text-muted-foreground">
-            등록된 구사 언어가 없습니다.
-          </p>
-        ) : (
-          <div className="flex flex-col gap-3">
-            {languages.map((lang, index) => (
-              <div
-                key={index}
-                className="grid grid-cols-1 gap-2 sm:grid-cols-3"
-              >
-                <ReadOnlyField label="언어명" value={lang.language} />
-                <ReadOnlyField label="숙련도" value={lang.level} />
-                <ReadOnlyField
-                  label="자격증"
-                  value={lang.certification ?? '-'}
-                />
-              </div>
-            ))}
-          </div>
-        ))}
-
-      {isEditing && (
-        <div className="flex flex-col gap-2">
-          {draftRows.length === 0 && (
-            <p className="text-xs text-muted-foreground">
-              등록된 구사 언어가 없습니다. "언어 추가" 버튼으로 추가할 수
-              있습니다.
-            </p>
-          )}
-          {draftRows.map((row, index) => (
-            <div
-              key={index}
-              className="grid grid-cols-1 items-center gap-2 sm:grid-cols-[1fr_1fr_1fr_auto]"
-            >
-              <Input
-                aria-label="언어명"
-                placeholder="언어명 (예: 영어)"
-                value={row.language}
-                onChange={(e) =>
-                  updateRow(index, { language: e.target.value })
-                }
-              />
-              <Input
-                aria-label="숙련도"
-                placeholder="숙련도 (예: 유창함)"
-                value={row.level}
-                onChange={(e) => updateRow(index, { level: e.target.value })}
-              />
-              <Input
-                aria-label="자격증"
-                placeholder="자격증 (선택)"
-                value={row.certification ?? ''}
-                onChange={(e) =>
-                  updateRow(index, { certification: e.target.value })
-                }
-              />
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                onClick={() => removeRow(index)}
-                aria-label="언어 삭제"
-              >
-                <Trash2 />
-              </Button>
-            </div>
-          ))}
-        </div>
-      )}
-      {error && <p className="text-xs text-destructive">{error}</p>}
-    </div>
   )
 }

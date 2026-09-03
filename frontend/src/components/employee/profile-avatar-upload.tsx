@@ -1,6 +1,7 @@
-// 계정 정보 섹션 맨 위에 들어가는 프로필 사진 등록 위젯입니다.
-// - 등록된 사진이 있으면 동그라미 안에 사진이, 없으면 이름 첫 글자가 표시됩니다.
-// - 동그라미 오른쪽 아래 연필 버튼을 누르면 파일을 고를 수 있고,
+// 기본 정보 섹션 맨 위, 가운데에 들어가는 프로필 사진 등록 위젯입니다.
+// - 등록된 사진이 있으면 원본 그대로(3.5:4.5 비율의 네모) 보여주고,
+//   없으면 이름 첫 글자가 표시됩니다. (동그라미로 자르지 않습니다)
+// - 오른쪽 아래 연필 버튼을 누르면 파일을 고를 수 있고,
 //   고른 사진은 3.5:4.5(413x531) 비율에 맞춰 자른 뒤에야 실제로 쓰입니다.
 import { useEffect, useRef, useState, type ChangeEvent } from 'react'
 import Cropper, { type Area } from 'react-easy-crop'
@@ -16,11 +17,11 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { getCroppedImageBlob } from '@/lib/crop-image'
-
-// 국내 증명사진 표준 규격: 3.5cm x 4.5cm (권장 픽셀 413 x 531)
-const PROFILE_IMAGE_WIDTH = 413
-const PROFILE_IMAGE_HEIGHT = 531
-const PROFILE_IMAGE_ASPECT = PROFILE_IMAGE_WIDTH / PROFILE_IMAGE_HEIGHT
+import {
+  PROFILE_IMAGE_ASPECT,
+  PROFILE_IMAGE_HEIGHT,
+  PROFILE_IMAGE_WIDTH,
+} from '@/config/profile-image'
 
 interface ProfileAvatarUploadProps {
   // 사진이 없을 때 동그라미 안에 보여줄 이름 (첫 글자만 사용합니다)
@@ -29,6 +30,9 @@ interface ProfileAvatarUploadProps {
   imageUrl: string | null
   // 실제 업로드가 진행 중인 동안 스피너를 겹쳐 보여줄 때 true로 둡니다
   isUploading?: boolean
+  // false면 연필 버튼을 아예 숨겨서 사진을 바꿀 수 없게 합니다.
+  // (임직원 상세 정보에서 권한이 없는 타인의 사진을 볼 때 씁니다)
+  editable?: boolean
   // 사용자가 자르기까지 마친 이미지를 넘겨받습니다. 실제 업로드는 호출부에서 처리합니다.
   onCropped: (blob: Blob) => void
 }
@@ -37,6 +41,7 @@ export function ProfileAvatarUpload({
   name,
   imageUrl,
   isUploading = false,
+  editable = true,
   onCropped,
 }: ProfileAvatarUploadProps) {
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -86,33 +91,37 @@ export function ProfileAvatarUpload({
   const initial = name.trim().charAt(0) || '?'
 
   return (
-    <div className="flex items-center gap-4">
-      <div className="relative h-20 w-20 shrink-0">
+    <div className="flex justify-center">
+      {/* 원본 사진 비율(3.5:4.5)을 그대로 살린 네모 모양입니다. 살짝만
+          둥글게(rounded-md) 처리해서 동그라미와는 다르게 보이도록 합니다. */}
+      <div className="relative w-32 shrink-0 aspect-[413/531]">
         {imageUrl ? (
           <img
             src={imageUrl}
             alt="프로필 사진"
-            className="h-20 w-20 rounded-full object-cover ring-1 ring-border"
+            className="h-full w-full rounded-md object-cover ring-1 ring-border"
           />
         ) : (
-          <div className="flex h-20 w-20 items-center justify-center rounded-full bg-primary/15 text-2xl font-semibold text-primary ring-1 ring-border">
+          <div className="flex h-full w-full items-center justify-center rounded-md bg-primary/15 text-3xl font-semibold text-primary ring-1 ring-border">
             {initial}
           </div>
         )}
         {isUploading && (
-          <div className="absolute inset-0 flex items-center justify-center rounded-full bg-background/70">
+          <div className="absolute inset-0 flex items-center justify-center rounded-md bg-background/70">
             <Loader2 className="h-5 w-5 animate-spin text-foreground" />
           </div>
         )}
-        <button
-          type="button"
-          onClick={openFilePicker}
-          disabled={isUploading}
-          className="absolute right-0 bottom-0 flex h-7 w-7 items-center justify-center rounded-full border-2 border-background bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
-          aria-label="프로필 사진 등록"
-        >
-          <Pencil className="h-3.5 w-3.5" />
-        </button>
+        {editable && (
+          <button
+            type="button"
+            onClick={openFilePicker}
+            disabled={isUploading}
+            className="absolute right-1 bottom-1 flex h-7 w-7 items-center justify-center rounded-full border-2 border-background bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
+            aria-label="프로필 사진 등록"
+          >
+            <Pencil className="h-3.5 w-3.5" />
+          </button>
+        )}
         <input
           ref={fileInputRef}
           type="file"
@@ -121,9 +130,6 @@ export function ProfileAvatarUpload({
           onChange={handleFileChange}
         />
       </div>
-      <p className="text-xs text-muted-foreground">
-        3.5 x 4.5cm 증명사진 규격으로 자동으로 잘리고 압축됩니다.
-      </p>
 
       <Dialog
         open={sourceUrl !== null}

@@ -2,6 +2,8 @@
 // 백엔드는 보통 { message: string, data: T } 형태로 응답을 감싸서 내려주므로,
 // 이 파일에서 그 껍데기를 벗기고 실제 데이터(T)만 돌려줍니다.
 
+import { getRequestAccessToken } from './auth-token-store'
+
 // 백엔드 서버 주소. .env에 VITE_API_BASE_URL을 지정하면 그 값을 쓰고,
 // 없으면 로컬 개발 기본값(uvicorn 기본 포트)을 사용합니다.
 const API_BASE_URL =
@@ -65,9 +67,18 @@ export async function apiFetch<T>(
   init?: RequestInit,
 ): Promise<T> {
   let response: Response
+  // 로그인된 상태라면 매 요청마다 Authorization 헤더를 함께 보냅니다.
+  // (지금은 아직 이 헤더를 검사하는 API가 없지만, 추후 인증이 필요한
+  // API가 추가되었을 때 프론트를 따로 고치지 않아도 되도록 미리 실어 둡니다)
+  const accessToken = getRequestAccessToken()
   try {
     response = await fetch(`${API_BASE_URL}${path}`, {
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(accessToken
+          ? { Authorization: `Bearer ${accessToken}` }
+          : {}),
+      },
       ...init,
     })
   } catch {
@@ -87,9 +98,11 @@ export async function apiUpload<T>(
   formData: FormData,
 ): Promise<T> {
   let response: Response
+  const accessToken = getRequestAccessToken()
   try {
     response = await fetch(`${API_BASE_URL}${path}`, {
       method: 'POST',
+      headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
       body: formData,
     })
   } catch {

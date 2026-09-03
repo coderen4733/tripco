@@ -117,6 +117,7 @@ export interface EmployeeDetail {
 // 항목을 하나씩 고쳐서 저장할 때는 바뀐 필드 1개만 담아서 보내면 됩니다.
 export type EmployeeUpdatePayload = Partial<{
   login_id: string
+  password: string
   admin_role: string
   name_kor: string
   name_eng: string

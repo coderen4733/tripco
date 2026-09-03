@@ -1,10 +1,14 @@
 from datetime import datetime, timedelta, timezone
 
-import bcrypt
 import jwt
-from fastapi import HTTPException, status
+from fastapi import HTTPException, UploadFile, status
+from fastapi.concurrency import (
+    run_in_threadpool,  # 동기 함수(Pillow 이미지 처리)를 비동기로 실행
+)
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
+from apps.alarm import service as alarm_service
+from apps.alarm.models.enums import AlarmCategory, AlarmType
 from apps.auth import repository as auth_repository
 from apps.auth.models.entities import TokenEntity
 from apps.auth.models.schemas import (
@@ -17,6 +21,11 @@ from apps.auth.models.schemas import (
 )
 from apps.employee import repository as employee_repository
 from apps.employee.models.entities import EmployeeEntity
+from apps.employee.models.schemas import (
+    EmployeeCreateReq,
+    EmployeeCreateRes,
+    EmployeeProfileImageRes,
+)
 from core.config import (
     ACCESS_TOKEN_EXPIRE,
     ACCESS_TOKEN_SECRET,
@@ -24,6 +33,9 @@ from core.config import (
     REFRESH_TOKEN_EXPIRE,
     REFRESH_TOKEN_SECRET,
 )
+from core.image import process_profile_image
+from core.s3 import upload_bytes_to_s3
+from core.security import hash_password, verify_password
 
 
 # 로그인(sign-in) API
@@ -35,14 +47,10 @@ async def sign_in(
         db, dto.login_id, None
     )
     # 1-1. Employee가 없거나 비밀번호 불일치 시
-    # if not employee or not bcrypt.checkpw(
-    #     dto.password.encode("utf-8"), employee["password"].encode("utf-8")
-    # ):
-    #     raise HTTPException(
-    #         status_code=status.HTTP_401_UNAUTHORIZED,
-    #         detail="아이디 또는 비밀번호가 일치하지 않습니다.",
-    #     )
-    if not employee or (dto.password != employee["password"]):
+    is_password_valid = employee and await run_in_threadpool(
+        verify_password, dto.password, employee["password"]
+    )
+    if not employee or not is_password_valid:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="아이디 또는 비밀번호가 일치하지 않습니다.",
@@ -162,6 +170,130 @@ async def re_token(db: AsyncIOMotorDatabase, dto: ReTokenReq) -> dict:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="인증 세션이 유효하지 않습니다.",
         )
+
+
+# 회원가입(신규 계정 신청) API
+# 입력값은 '사원 추가' 폼과 완전히 동일한 EmployeeCreateReq를 그대로 쓴다.
+# 다만 바로 employees에 등록되는 게 아니라, 관리자급(최고관리자/관리자/
+# 부관리자) 승인을 받기 전까지는 employee_registrations(대기 명단)에만
+# 저장해둔다. (승인 이후 employees로 옮기는 로직은 별도 승인 API에서 처리)
+async def sign_up(
+    db: AsyncIOMotorDatabase, dto: EmployeeCreateReq
+) -> EmployeeCreateRes:
+    # 1. Duplicate Check - 이미 정식으로 등록된 임직원인 경우
+    if await employee_repository.get_employee_by_login_id(
+        db, dto.login_id, None
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="이미 존재하는 login_id입니다.",
+        )
+    if await employee_repository.get_employee_by_employee_id(
+        db, dto.employee_id, None
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="이미 존재하는 사번입니다.",
+        )
+    # 2. Duplicate Check - 이미 신청 후 승인 대기 중인 경우
+    if await employee_repository.get_employee_registration_by_login_id(
+        db, dto.login_id, None
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="이미 승인 대기 중인 login_id입니다.",
+        )
+    if await employee_repository.get_employee_registration_by_employee_id(
+        db, dto.employee_id, None
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="이미 승인 대기 중인 사번입니다.",
+        )
+    # 3. Create & Read
+    # 비밀번호는 평문 그대로 저장하지 않고 bcrypt로 해시해서 저장한다.
+    registration_data = dto.model_dump()
+    registration_data["password"] = await run_in_threadpool(
+        hash_password, registration_data["password"]
+    )
+    registration = EmployeeEntity(**registration_data)
+    new_registration_id = (
+        await employee_repository.create_employee_registration(
+            db, registration
+        )
+    )
+    new_registration = (
+        await employee_repository.get_employee_registration_by_id(
+            db, new_registration_id
+        )
+    )
+    if not new_registration:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="신청 정보가 저장되지 않았거나, 조회에 실패했습니다.",
+        )
+    # 4. 관리자급(최고관리자/관리자/부관리자) 임직원 전체에게 알람 전송
+    # (신규 계정 신청 = ERP 계정 관리 이슈라 "시스템" 카테고리로 분류한다)
+    await alarm_service.notify_admins(
+        db,
+        AlarmType.EMPLOYEE_REGISTRATION,
+        AlarmCategory.SYSTEM,
+        f"{dto.name_kor}님께서 신규 계정 신청을 하셨습니다.",
+        related_id=new_registration_id,
+    )
+    # 5. 데이터 변환 및 반환
+    new_registration["_id"] = str(new_registration["_id"])
+    data = EmployeeCreateRes(**new_registration)
+    return data
+
+
+# 신규 계정 신청(회원가입) 프로필 사진 업로드 API
+# employee_service.upload_profile_image와 거의 동일하지만, 대상이
+# employees가 아니라 employee_registrations(승인 대기 명단)라는 점만 다르다.
+async def upload_registration_profile_image(
+    db: AsyncIOMotorDatabase,
+    _id: str,
+    file: UploadFile,
+) -> EmployeeProfileImageRes:
+    registration = await employee_repository.get_employee_registration_by_id(
+        db, _id
+    )
+    if registration is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="프로필 사진을 등록할 신청 정보가 존재하지 않습니다.",
+        )
+    if not (file.content_type or "").startswith("image/"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="이미지 파일만 업로드할 수 있습니다.",
+        )
+    raw_bytes = await file.read()
+    try:
+        processed_bytes = await run_in_threadpool(
+            process_profile_image, raw_bytes
+        )
+    except Exception as err:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="이미지 파일을 처리할 수 없습니다.",
+        ) from err
+    url = await upload_bytes_to_s3(
+        processed_bytes,
+        "profile",
+        registration["employee_id"],
+        "jpg",
+        "image/jpeg",
+    )
+    await employee_repository.update_employee_registration(
+        db,
+        _id,
+        {
+            "profile_image_url": url,
+            "updated_at": datetime.now(timezone.utc),
+        },
+    )
+    return EmployeeProfileImageRes(profile_image_url=url)
 
 
 # 로그아웃(sign-out) API
